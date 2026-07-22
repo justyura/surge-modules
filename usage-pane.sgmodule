@@ -1,0 +1,10 @@
+#!name=代理流量面板
+#!desc=显示剩余流量、已用比例、到期日期和流量重置时间
+#!system=ios
+#!arguments=URL:"填写流量查询接口地址"
+#!arguments-desc=URL:\n流量查询接口的完整地址，例如 https://example.com/api/public/usage/<token>
+[Panel]
+ProxyUsage = title="代理流量",content="点击刷新获取数据",style=info,script-name=usage-panel,update-interval=3600
+[Script]
+usage-panel = type=generic,timeout=10,script-path=https://raw.githubusercontent.com/justyura/surge-modules/refs/heads/main/usage-pane.js,script-update-interval=86400,argument="url={{{URL}}}"
+
