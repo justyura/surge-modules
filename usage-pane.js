@@ -46,8 +46,15 @@ function finishError(message) {
   });
 }
 
-var args = parseArguments(typeof $argument === "undefined" ? "" : $argument);
-var apiUrl = args.url || "";
+var rawArgument = typeof $argument === "undefined" ? "" : String($argument);
+var args = parseArguments(rawArgument);
+// url 放在最后且可能自带 ?a=1&b=2，所以取 "url=" 之后的全部内容
+var urlMatch = rawArgument.match(/(?:^|&)url=(.*)$/);
+var apiUrl = urlMatch ? urlMatch[1] : args.url || "";
+try {
+  apiUrl = decodeURIComponent(apiUrl);
+} catch (decodeError) {}
+apiUrl = apiUrl.trim();
 
 if (!/^https?:\/\//i.test(apiUrl)) {
   finishError("模块未配置有效的 API 地址");
@@ -75,7 +82,7 @@ if (!/^https?:\/\//i.test(apiUrl)) {
         var used = number(data.bill_gib, number(data.bill_bytes, 0) / 1073741824);
         var left = number(data.left_gib, Math.max(0, limit - used));
         var percent = number(data.used_pct, limit > 0 ? (used / limit) * 100 : 0);
-        var expireDays = daysUntilInclusive(data.expires_at);
+        var expireDays = daysUntilInclusive(dateOnly(data.expires_at));
         var resetDays = number(data.reset_days_left, null);
 
         var color = percent >= 90 ? "#FF3B30" : percent >= 75 ? "#FF9500" : "#34C759";
