@@ -1,5 +1,5 @@
 #!name=App 去广告合集
-#!desc=哔哩哔哩、抖音、小红书、微博、知乎、微信、淘宝、闲鱼、京东、拼多多、美团和美团外卖、饿了么、高德地图。开屏和 App 内的广告、推广一起去
+#!desc=哔哩哔哩、YouTube、抖音、小红书、Twitter、微博、知乎、微信、淘宝、闲鱼、京东、拼多多、美团和美团外卖、饿了么、高德地图。开屏和 App 内的广告、推广一起去
 #!category=AdBlock
 #!system=ios
 #!arguments=动态最常访问:auto,创作中心:0,过滤置顶评论广告:1,日志等级:4
@@ -26,6 +26,14 @@ DOMAIN,ads-video-qc.xhscdn.com,REJECT
 DOMAIN,t-ads.xiaohongshu.com,REJECT
 # 不让走 QUIC，保证请求能被 MITM
 AND,((PROTOCOL,QUIC),(DOMAIN-SUFFIX,xiaohongshu.com)),REJECT
+
+# ---- Twitter ----
+DOMAIN-SUFFIX,ads-twitter.com,REJECT
+DOMAIN-SUFFIX,p.twitter.com,REJECT
+DOMAIN-SUFFIX,scribe.twitter.com,REJECT
+DOMAIN-SUFFIX,syndication.twitter.com,REJECT
+DOMAIN-SUFFIX,syndication-o.twitter.com,REJECT
+DOMAIN-SUFFIX,urls.api.twitter.com,REJECT
 
 # ---- 微博 ----
 # 日志上报
@@ -249,6 +257,10 @@ http-response ^https?:\/\/mobile\.yangkeduo\.com\/proxy\/api\/api\/express\/post
 ^https:\/\/grpc\.biliapi\.net\/bilibili\.app\.interface\.v1\.Search\/DefaultWords$ header="content-type: application/grpc|grpc-status: 0" data-type=base64 data="AAAAACEaHeaQnOe0ouinhumikeOAgeeVquWJp+aIlnVw5Li7KAE="
 ^https:\/\/grpc\.biliapi\.net\/bilibili\.app\.(?:view\.v1\.View\/TFInfo|viewunite\.v1\.View\/(?:PlayPause|ViewEndPage))$ header="content-type: application/grpc|grpc-status: 0" data-type=base64 data="AAAAAAA="
 
+# ---- YouTube ----
+# 片头广告
+^https:\/\/rr[\w-]+\.googlevideo\.com\/initplayback\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
 # ---- 小红书 ----
 # 惊喜弹窗
 ^https:\/\/edith\.xiaohongshu\.com\/api\/sns\/v1\/surprisebox\/(?:get_style|open|submit_action) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
@@ -356,6 +368,9 @@ bilibili.webpage = type=http-response,pattern=^https:\/\/www\.bilibili\.com\/bla
 # sponsorBlock 固定为 false：打开的话脚本会把播放器插件包换成第三方仓库里的版本
 bilibili.protobuf = type=http-response,pattern=^https:\/\/(?:grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.(?:app\.(?:show\.v1\.Popular\/Index|dynamic\.v2\.Dynamic\/DynAll|view(?:unite)?\.v1\.View\/(?:View|ViewProgress|RelatesFeed|AIRelateAsync)|playurl\.v1\.PlayURL\/PlayView|playerunite\.v1\.Player\/PlayViewUnite)|polymer\.app\.search\.v1\.Search\/SearchAll|community\.service\.dm\.v1\.DM\/DmView|main\.community\.reply\.v1\.Reply\/MainList|pgc\.gateway\.player\.v2\.PlayURL\/PlayView)$,argument="{"displayUpList":"{{{动态最常访问}}}","purifyComment":{{{过滤置顶评论广告}}},"sponsorBlock":false,"logLevel":"{{{日志等级}}}"}",requires-body=1,binary-body-mode=1,max-size=-1,engine=webview,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/kokoryh-Sparkle/bilibili.protobuf.response.js
 
+# ---- YouTube ----
+YouTube = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/(?:browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch)(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"captionLang":"off","blockUpload":false,"blockImmersive":false,"blockShorts":false,"debug":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/Maasea-sgmodule/youtube.response.js
+
 # ---- 小红书 ----
 小红书开屏 = type=http-response,pattern=^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/system_service\/(?:config\?|splash_config),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/xiaohongshu.js
 小红书信息流 = type=http-response,pattern=^https?:\/\/(?:edith|rec|www)\.xiaohongshu\.com\/api\/sns\/v\d+\/(?:homefeed\?|followfeed\?|user\/followings\/followfeed|recommend\/user\/follow_recommend),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/xiaohongshu.js
@@ -391,4 +406,4 @@ bilibili.protobuf = type=http-response,pattern=^https:\/\/(?:grpc\.biliapi\.net|
 京东 = type=http-response,pattern=^https:\/\/api\.m\.jd\.com\/client\.action\?functionId=(?:deliverLayer|getTabHomeInfo|myOrderInfo|orderTrackBusiness|personinfoBusiness|start|welcomeHome),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/jingdong.js
 
 [MITM]
-hostname = %APPEND% grpc.biliapi.net, app.bilibili.com, api.bilibili.com, api.live.bilibili.com, www.bilibili.com, line3-h5-mobile-api.biligame.com, edith.xiaohongshu.com, www.xiaohongshu.com, rec.xiaohongshu.com, so.xiaohongshu.com, api.weibo.cn, api.weibo.com, mapi.weibo.cn, mapi.weibo.com, weibointl.api.weibo.cn, weibointl.api.weibo.com, bootrealtime.uve.weibo.com, card.weibo.com, weibo.com, api.zhihu.com, www.zhihu.com, appcloud2.zhihu.com, m-cloud.zhihu.com, zhuanlan.zhihu.com, page-info.zhihu.com, zhstatic.zhihu.com, mp.weixin.qq.com, acs.m.taobao.com, guide-acs.m.taobao.com, poplayer.template.alibaba.com, acs.m.goofish.com, g-acs.m.goofish.com, api.m.jd.com, api.pinduoduo.com, api.yangkeduo.com, mobile.yangkeduo.com, wmapi.meituan.com, img.meituan.net, s3plus.meituan.net, flowplus.meituan.net, elemecdn.com, fuss10.elemecdn.com, cube.elemecdn.com, nr-op.elemecdn.com, www1.elecfans.com, m5.amap.com, amap-aos-info-nogw.amap.com
+hostname = %APPEND% grpc.biliapi.net, app.bilibili.com, api.bilibili.com, api.live.bilibili.com, www.bilibili.com, line3-h5-mobile-api.biligame.com, rr*.googlevideo.com, youtubei.googleapis.com, edith.xiaohongshu.com, www.xiaohongshu.com, rec.xiaohongshu.com, so.xiaohongshu.com, api.weibo.cn, api.weibo.com, mapi.weibo.cn, mapi.weibo.com, weibointl.api.weibo.cn, weibointl.api.weibo.com, bootrealtime.uve.weibo.com, card.weibo.com, weibo.com, api.zhihu.com, www.zhihu.com, appcloud2.zhihu.com, m-cloud.zhihu.com, zhuanlan.zhihu.com, page-info.zhihu.com, zhstatic.zhihu.com, mp.weixin.qq.com, acs.m.taobao.com, guide-acs.m.taobao.com, poplayer.template.alibaba.com, acs.m.goofish.com, g-acs.m.goofish.com, api.m.jd.com, api.pinduoduo.com, api.yangkeduo.com, mobile.yangkeduo.com, wmapi.meituan.com, img.meituan.net, s3plus.meituan.net, flowplus.meituan.net, elemecdn.com, fuss10.elemecdn.com, cube.elemecdn.com, nr-op.elemecdn.com, www1.elecfans.com, m5.amap.com, amap-aos-info-nogw.amap.com

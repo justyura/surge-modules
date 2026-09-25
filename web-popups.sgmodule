@@ -1,0 +1,14 @@
+#!name=网页弹窗和广告拦截
+#!desc=用 Safari 浏览网页时拦截弹窗、跳转广告、网页广告和跟踪。按域名拦截，不需要 MITM
+#!category=AdBlock
+#!arguments=弹窗广告:REJECT,网页广告:REJECT
+#!arguments-desc=每一项填 REJECT 拦截，填 DIRECT 关掉\n\n弹窗广告\nHaGeZi Pop-Up Ads，约 5 万个弹窗、跳转广告域名，本仓库每天自动同步\n\n网页广告\nSukka 的 reject 规则集，合并了 AdGuard、EasyPrivacy 等过滤列表，约 13 万个广告和跟踪域名
+
+# 弹窗列表：HaGeZi dns-blocklists（GPL-3.0），由 tools/update_popupads.py 转成 Surge 格式
+# 网页广告：SukkaW/Surge（AGPL-3.0），直接引用 ruleset.skk.moe
+# 注意：iOS 上的 Surge 不能按 App 分流，这些规则对所有 App 都生效
+
+[Rule]
+DOMAIN-SET,https://raw.githubusercontent.com/justyura/surge-modules/main/rules/hagezi-popupads.txt,{{{弹窗广告}}},extended-matching
+DOMAIN-SET,https://ruleset.skk.moe/List/domainset/reject.conf,{{{网页广告}}},extended-matching
+RULE-SET,https://ruleset.skk.moe/List/non_ip/reject.conf,{{{网页广告}}},extended-matching

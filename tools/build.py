@@ -16,7 +16,7 @@ OUT = ROOT / "adblock.sgmodule"
 
 # 合并顺序，没列出的 App 按文件名排在最后
 ORDER = [
-    "bilibili", "douyin", "xiaohongshu", "weibo", "zhihu", "wechat",
+    "bilibili", "youtube", "douyin", "xiaohongshu", "twitter", "weibo", "zhihu", "wechat",
     "taobao", "xianyu", "jd", "pinduoduo", "meituan", "eleme", "amap",
 ]
 SECTIONS = ["Rule", "URL Rewrite", "Body Rewrite", "Map Local", "Script", "MITM"]

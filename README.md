@@ -7,7 +7,8 @@
 | 模块 | 作用 | 安装链接 |
 | --- | --- | --- |
 | 代理流量面板 | 在面板里显示剩余流量、已用比例、到期日期和重置时间 | `https://raw.githubusercontent.com/justyura/surge-modules/main/usage-pane.sgmodule` |
-| App 去广告合集 | 13 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
+| App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
+| 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 
 ## 代理流量面板
 
@@ -73,8 +74,10 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 | App | 去掉什么 |
 | --- | --- |
 | 哔哩哔哩 | 开屏、首页推荐、动态、视频页、评论区、直播、搜索 |
+| YouTube | 首页、搜索、播放页、Shorts 里的广告，片头广告；YouTube Music 也管 |
 | 抖音 | 只能拦广告投放和素材域名，信息流广告去不掉 |
 | 小红书 | 开屏、首页和关注页信息流、搜索页、详情页 |
+| Twitter / X | 只能拦广告和统计域名，时间线里的推广帖目前没有可用规则 |
 | 微博 | 开屏、信息流、热搜、发现页、超话、详情页、评论区，含轻享版 |
 | 知乎 | 开屏、首页推荐、热榜、回答页、评论区、搜索页、会员页 |
 | 微信 | 只能去公众号文章底部广告和商品推广 |
@@ -86,7 +89,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 | 饿了么 | 开屏图片和视频、广告和统计域名 |
 | 高德地图 | 开屏、启动广告、增值推广、广告和统计域名 |
 
-抖音和微信的广告走它们自己的加密协议，MITM 解不开，所以只能做到上面这些。美团主 App 目前找不到靠谱的规则。
+抖音和微信的广告走它们自己的加密协议，MITM 解不开，所以只能做到上面这些。美团主 App 和 Twitter 的推广帖目前找不到靠谱的规则。
 
 ### 安装
 
@@ -111,13 +114,51 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 ### 来源
 
 - [kokoryh/Sparkle](https://github.com/kokoryh/Sparkle)（GPL-3.0）：哔哩哔哩
-- [fmz200/wool_scripts](https://github.com/fmz200/wool_scripts)（GPL-3.0）：其他所有 App
+- [Maasea/sgmodule](https://github.com/Maasea/sgmodule)（Apache-2.0）：YouTube。只用了处理响应的脚本；它的 request 脚本会把播放请求转到作者的 Cloudflare Worker，没用
+- [fmz200/wool_scripts](https://github.com/fmz200/wool_scripts)（GPL-3.0）：其他所有 App，以及 YouTube 片头广告
 
 规则基本照搬上游，去掉了跟去广告无关的部分：去水印、解除下载限制、换皮肤、解锁会员图标、外链跳转、P2P 屏蔽、空降助手。
 
 ### 失效了怎么办
 
 App 更新后接口会变。先去上游看有没有新规则，有的话改 `ads/` 里对应的文件、重新复制脚本、跑一次生成。
+
+## 网页弹窗和广告拦截
+
+给手机上用 Safari 浏览网页准备的，和 App 去广告合集分开装：
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule
+```
+
+按域名拦截，不用开 MITM，不碰网页内容，不会拖慢加载。
+
+| 参数 | 默认 | 内容 |
+| --- | --- | --- |
+| 弹窗广告 | REJECT | [HaGeZi Pop-Up Ads](https://github.com/hagezi/dns-blocklists)，约 5 万个弹窗、跳转广告域名 |
+| 网页广告 | REJECT | [Sukka 的 reject 规则集](https://ruleset.skk.moe)，合并了 AdGuard、EasyPrivacy 等，约 13 万个广告和跟踪域名 |
+
+哪项不想要就把参数改成 `DIRECT`。
+
+### 需要知道的
+
+- iOS 上的 Surge 不能只对 Safari 生效，这些规则对所有 App 都起作用。某个 App 出问题，先把「网页广告」改成 `DIRECT` 试试。
+- 只能拦「从广告域名加载的东西」。网站自己用 JS 画出来的遮罩、点一下就开新标签页的那种弹窗，按域名拦不掉，要配合下面的 Safari 扩展。
+- HaGeZi 的原始列表只写主域名，Surge 要在前面加 `.` 才会连子域名一起拦，所以本仓库每天用 GitHub Actions 跑 `tools/update_popupads.py` 转一遍，存在 `rules/hagezi-popupads.txt`。
+
+### 现有的成熟方案
+
+| 方案 | 做法 | 适合 |
+| --- | --- | --- |
+| [HaGeZi dns-blocklists](https://github.com/hagezi/dns-blocklists) | 按域名拦，有专门的 Pop-Up Ads 列表，每天更新，GPL-3.0 | 弹窗和跳转广告，本模块在用 |
+| [SukkaW/Surge](https://github.com/SukkaW/Surge) | 专为 Surge 生成的规则集，合并多个过滤列表，每天更新，AGPL-3.0 | 通用网页广告和跟踪，本模块在用 |
+| [AWAvenue 秋风广告规则](https://github.com/TG-Twilight/AWAvenue-Ads-Rule) | 按域名拦，有 Surge 格式，只有几百条，偏 App 内广告 SDK | 想要小而精的规则 |
+| [anti-AD](https://github.com/privacy-protection-tools/anti-AD) | 按域名拦，中文区覆盖好，有 Surge 格式，MIT | 国内网站多的话可以加 |
+| [Adblock4limbo](https://github.com/limbopro/Adblock4limbo) | MITM 四百多个站点，往网页里注入 JS 去广告，MIT | 只针对特定影视站，要解密大量网站流量，不推荐当通用方案 |
+| Safari 内容拦截器：AdGuard、Wipr、1Blocker | 系统级 Safari 扩展，能隐藏网页元素 | 网页里的横幅、遮罩、Cookie 提示 |
+| [Userscripts](https://github.com/quoid/userscripts) + [AdGuard Popup Blocker](https://github.com/AdguardTeam/PopupBlocker) | 开源 Safari 扩展跑用户脚本，拦 JS 打开的新窗口 | 点一下就跳新标签页的那种弹窗 |
+
+推荐组合：本模块管域名，再装一个 AdGuard（免费）管网页元素；还有「点一下就跳走」的，加 Userscripts + AdGuard Popup Blocker。
 
 ## 规矩
 
