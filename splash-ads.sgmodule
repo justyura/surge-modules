@@ -1,0 +1,5 @@
+#!name=【已停用】开屏去广告，请删除
+#!desc=这个模块已经合并进「App 去广告合集」。请在 Surge 里删掉它，改装 https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
+#!category=AdBlock
+
+# 旧链接保留成空模块，免得已经装过的 Surge 更新时报 404
