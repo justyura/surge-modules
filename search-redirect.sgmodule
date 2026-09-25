@@ -1,37 +1,36 @@
 #!name=搜索引擎重定向
 #!desc=把 Google、Kagi、DuckDuckGo、Bing 等搜索引擎的搜索请求 302 跳转到自建搜索引擎。只动搜索结果页，搜索建议和其他页面不受影响
 #!category=Tool
-#!arguments=搜索地址:"https://search.wtyura.com/search?q="
-#!arguments-desc=搜索地址\n搜索词会直接拼在这个地址后面，默认是 https://search.wtyura.com/search?q=
 
 # 搜索词原样带过去（已经是 URL 编码过的），空格的 + 号自建引擎会当成空格处理
 # 想临时用回原来的搜索引擎，在 Surge 里关掉这个模块
+# 换搜索地址：把下面所有 https://search.wtyura.com/search?q= 换掉
 
 [URL Rewrite]
 # Google：www.google.com 以及 google.com.hk、google.co.jp 这类各国域名
-^https?:\/\/(?:www\.)?google\.[a-z]{2,3}(?:\.[a-z]{2})?\/search\?(?:[^#]*&)?q=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/(?:www\.)?google\.[a-z]{2,3}(?:\.[a-z]{2})?\/search\?(?:[^#]*&)?q=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # Kagi
-^https?:\/\/kagi\.com\/search\?(?:[^#]*&)?q=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/kagi\.com\/search\?(?:[^#]*&)?q=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # DuckDuckGo：主站、HTML 版、Lite 版（/ac/ 是搜索建议，不动）
-^https?:\/\/(?:html\.|lite\.)?duckduckgo\.com\/(?:html\/|lite\/)?\?(?:[^#]*&)?q=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/(?:html\.|lite\.)?duckduckgo\.com\/(?:html\/|lite\/)?\?(?:[^#]*&)?q=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # Bing
-^https?:\/\/(?:www\.|cn\.)?bing\.com\/search\?(?:[^#]*&)?q=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/(?:www\.|cn\.)?bing\.com\/search\?(?:[^#]*&)?q=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # Yahoo
-^https?:\/\/search\.yahoo\.com\/search[^?]*\?(?:[^#]*&)?p=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/search\.yahoo\.com\/search[^?]*\?(?:[^#]*&)?p=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # Brave Search
-^https?:\/\/search\.brave\.com\/search\?(?:[^#]*&)?q=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/search\.brave\.com\/search\?(?:[^#]*&)?q=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # Ecosia
-^https?:\/\/www\.ecosia\.org\/search\?(?:[^#]*&)?q=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/www\.ecosia\.org\/search\?(?:[^#]*&)?q=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # Startpage
-^https?:\/\/www\.startpage\.com\/(?:sp|do)\/search\?(?:[^#]*&)?(?:query|q)=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/www\.startpage\.com\/(?:sp|do)\/search\?(?:[^#]*&)?(?:query|q)=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # Yandex
-^https?:\/\/(?:www\.)?yandex\.[a-z]{2,3}\/search\/?\?(?:[^#]*&)?text=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/(?:www\.)?yandex\.[a-z]{2,3}\/search\/?\?(?:[^#]*&)?text=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # 百度：电脑版 wd=，手机版 word=
-^https?:\/\/(?:www|m)\.baidu\.com\/s\?(?:[^#]*&)?(?:wd|word)=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/(?:www|m)\.baidu\.com\/s\?(?:[^#]*&)?(?:wd|word)=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # 搜狗
-^https?:\/\/(?:www|m|wap)\.sogou\.com\/(?:web|web\/searchList\.jsp)\?(?:[^#]*&)?(?:query|keyword)=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/(?:www|m|wap)\.sogou\.com\/(?:web|web\/searchList\.jsp)\?(?:[^#]*&)?(?:query|keyword)=([^&#]*) https://search.wtyura.com/search?q=$1 302
 # 360 搜索
-^https?:\/\/(?:www|m)\.so\.com\/s\?(?:[^#]*&)?q=([^&#]*) {{{搜索地址}}}$1 302
+^https?:\/\/(?:www|m)\.so\.com\/s\?(?:[^#]*&)?q=([^&#]*) https://search.wtyura.com/search?q=$1 302
 
 [MITM]
 hostname = %APPEND% google.*, www.google.*, kagi.com, duckduckgo.com, html.duckduckgo.com, lite.duckduckgo.com, bing.com, www.bing.com, cn.bing.com, search.yahoo.com, search.brave.com, www.ecosia.org, www.startpage.com, yandex.*, www.yandex.*, www.baidu.com, m.baidu.com, www.sogou.com, m.sogou.com, wap.sogou.com, www.so.com, m.so.com

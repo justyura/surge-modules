@@ -209,7 +209,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sg
 
 - 只跳搜索结果页。搜索建议、首页、地图、账号页都不动。
 - 要开 MITM，上面这些搜索引擎的域名会被解密。
-- 换成别的搜索地址：改模块参数「搜索地址」，搜索词会直接拼在后面。
+- 换成别的搜索地址：把模块里的 `https://search.wtyura.com/search?q=` 全部换掉。
 - 想临时用回原来的搜索引擎，在 Surge 里关掉这个模块。
 
 ## 规矩
