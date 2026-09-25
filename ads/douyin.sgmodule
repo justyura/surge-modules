@@ -1,0 +1,10 @@
+#!name=抖音去广告
+#!desc=拦截广告投放和素材域名。抖音信息流里的广告走自己的协议，MITM 去不掉
+#!category=AdBlock
+#!system=ios
+
+# 规则来自 fmz200/wool_scripts（GPL-3.0）
+
+[Rule]
+DOMAIN-KEYWORD,bds.snssdk.com,REJECT
+DOMAIN-KEYWORD,p3.pstatp.com,REJECT

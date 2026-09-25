@@ -1,0 +1,17 @@
+#!name=微信去广告
+#!desc=公众号文章底部广告和商品推广。朋友圈、小程序广告走微信自己的加密协议，MITM 去不掉
+#!category=AdBlock
+#!system=ios
+
+# 规则来自 fmz200/wool_scripts（GPL-3.0）
+
+[Body Rewrite]
+# 公众号文章广告：把 advertisement 字段改名，客户端就读不到广告
+http-response ^https?:\/\/mp\.weixin\.qq\.com\/mp\/getappmsgad advertisement no_ad
+
+[Map Local]
+# 公众号商品推广
+^https?:\/\/mp\.weixin\.qq\.com\/mp\/cps_product_info\?action data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+[MITM]
+hostname = %APPEND% mp.weixin.qq.com
