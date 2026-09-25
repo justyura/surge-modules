@@ -1,0 +1,35 @@
+#!name=京东去广告
+#!desc=开屏、首页悬浮和通栏推广、我的页面、订单页里的广告，关掉直播小窗
+#!category=AdBlock
+#!system=ios
+
+# 规则和脚本来自 fmz200/wool_scripts（GPL-3.0），脚本存了一份在本仓库 scripts/vendor/fmz200-wool_scripts
+
+[Rule]
+DOMAIN-SUFFIX,jzt.jd.com,REJECT
+DOMAIN-SUFFIX,img-x.jd.com,REJECT
+DOMAIN-SUFFIX,du.jd.com,REJECT
+DOMAIN-SUFFIX,c-nfa.jd.com,REJECT
+DOMAIN-SUFFIX,cm.jd.com,REJECT
+DOMAIN-SUFFIX,jddebug.com,REJECT
+DOMAIN-SUFFIX,policy.jd.com,REJECT
+DOMAIN-SUFFIX,kepler.jd.com,REJECT
+DOMAIN-SUFFIX,bdsp.x.jd.com,REJECT
+DOMAIN-SUFFIX,keplerapi.jd.com,REJECT
+DOMAIN-SUFFIX,mapi.m.jd.com,REJECT
+DOMAIN-SUFFIX,ad.3.cn,REJECT
+DOMAIN-SUFFIX,jd.c-ptsp.com.cn,REJECT
+# 京东自带的 DNS，挡掉后才会走系统 DNS 被 MITM
+DOMAIN,dns.jd.com,REJECT
+IP-CIDR,101.124.19.122/32,REJECT,no-resolve
+IP-CIDR6,2402:db40:5100:1011::5/128,REJECT,no-resolve
+
+[URL Rewrite]
+# 直播小窗
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=getWidgetV1052 - reject
+
+[Script]
+京东 = type=http-response,pattern=^https:\/\/api\.m\.jd\.com\/client\.action\?functionId=(?:deliverLayer|getTabHomeInfo|myOrderInfo|orderTrackBusiness|personinfoBusiness|start|welcomeHome),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/jingdong.js
+
+[MITM]
+hostname = %APPEND% api.m.jd.com

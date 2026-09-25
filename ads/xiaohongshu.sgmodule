@@ -1,0 +1,33 @@
+#!name=小红书去广告
+#!desc=开屏、首页和关注页信息流、搜索页、详情页里的广告和推广
+#!category=AdBlock
+#!system=ios
+
+# 规则和脚本来自 fmz200/wool_scripts（GPL-3.0），脚本存了一份在本仓库 scripts/vendor/fmz200-wool_scripts
+
+[Rule]
+DOMAIN,ads-img-qc.xhscdn.com,REJECT
+DOMAIN,ads-video-al.xhscdn.com,REJECT
+DOMAIN,ads-video-qc.xhscdn.com,REJECT
+DOMAIN,t-ads.xiaohongshu.com,REJECT
+# 不让走 QUIC，保证请求能被 MITM
+AND,((PROTOCOL,QUIC),(DOMAIN-SUFFIX,xiaohongshu.com)),REJECT
+
+[Map Local]
+# 惊喜弹窗
+^https:\/\/edith\.xiaohongshu\.com\/api\/sns\/v1\/surprisebox\/(?:get_style|open|submit_action) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https?:\/\/www\.xiaohongshu\.com\/api\/marketing\/box\/trigger\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 信息流引导、预加载推广、用户横幅、广告资源
+^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/note\/guide\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/note\/detailfeed\/preload\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/guide\/user_banner data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https?:\/\/www\.xiaohongshu\.com\/api\/sns\/(v\d+\/ads\/resource|v\d+\/hey\/\w+\/hey_gallery) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+[Script]
+小红书开屏 = type=http-response,pattern=^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/system_service\/(?:config\?|splash_config),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/xiaohongshu.js
+小红书信息流 = type=http-response,pattern=^https?:\/\/(?:edith|rec|www)\.xiaohongshu\.com\/api\/sns\/v\d+\/(?:homefeed\?|followfeed\?|user\/followings\/followfeed|recommend\/user\/follow_recommend),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/xiaohongshu.js
+小红书搜索页 = type=http-response,pattern=^https?:\/\/(?:so|edith)\.xiaohongshu\.com\/api\/sns\/v\d+\/search\/(?:banner_list|hot_list|hint|trending\?|notes\?),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/xiaohongshu.js
+小红书详情页 = type=http-response,pattern=^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/note\/widgets,requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/xiaohongshu.js
+
+[MITM]
+hostname = %APPEND% edith.xiaohongshu.com, www.xiaohongshu.com, rec.xiaohongshu.com, so.xiaohongshu.com

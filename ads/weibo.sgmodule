@@ -1,0 +1,81 @@
+#!name=微博去广告
+#!desc=开屏、首页信息流、热搜、发现页、超话、详情页、评论区里的广告和推广，也支持微博轻享版
+#!category=AdBlock
+#!system=ios
+
+# 规则和脚本来自 fmz200/wool_scripts（GPL-3.0），脚本存了一份在本仓库 scripts/vendor/fmz200-wool_scripts
+
+[Rule]
+# 日志上报
+URL-REGEX,"^https?:\/\/api\.weibo\.cn\/2\/(push\/active|client\/addlog_batch|ad\/preload)",REJECT-DROP
+URL-REGEX,"^https?:\/\/api-cloudim\.api\.weibo\.com\/v1\/log\/",REJECT-DROP
+# 开屏
+DOMAIN-SUFFIX,biz.weibo.com,REJECT
+DOMAIN,bootpreload.uve.weibo.com,REJECT
+DOMAIN-SUFFIX,sdkapp.uve.weibo.com,REJECT
+DOMAIN-SUFFIX,wbapp.uve.weibo.com,REJECT
+# 广告素材和投放
+DOMAIN-SUFFIX,fastimage.uve.weibo.com,REJECT
+DOMAIN-SUFFIX,adimg.uve.weibo.com,REJECT
+DOMAIN-SUFFIX,adimg.vue.weibo.com,REJECT
+DOMAIN-SUFFIX,click.uve.weibo.com,REJECT
+DOMAIN,datacollection.uve.weibo.com,REJECT
+DOMAIN,adpinpai.video.weibocdn.com,REJECT
+DOMAIN-SUFFIX,zymo.mps.weibo.com,REJECT
+DOMAIN-SUFFIX,promote.biz.weibo.cn,REJECT
+DOMAIN-SUFFIX,biz.weibo.com.cn,REJECT
+DOMAIN-SUFFIX,alitui.weibo.com,REJECT
+DOMAIN-SUFFIX,alitui.weibo.com.cn,REJECT
+DOMAIN-SUFFIX,tui.weibo.com,REJECT
+DOMAIN-SUFFIX,wax.weibo.com,REJECT
+DOMAIN-SUFFIX,wax.weibo.com.cn,REJECT
+DOMAIN-SUFFIX,ad.weibo.com,REJECT
+DOMAIN-SUFFIX,dsp.edm.weibo.cn,REJECT
+DOMAIN-SUFFIX,widget.weibo.com,REJECT
+DOMAIN-SUFFIX,dp.im.weibo.cn,REJECT
+DOMAIN-SUFFIX,weibomingzi.com,REJECT
+DOMAIN-SUFFIX,game.weibo.cn,REJECT
+DOMAIN-SUFFIX,game.weibo.com,REJECT
+DOMAIN-SUFFIX,gw5.push.mcp.weibo.cn,REJECT
+DOMAIN-SUFFIX,gw6.push.mcp.weibo.cn,REJECT
+
+[URL Rewrite]
+^https:\/\/api\.weibo\.cn\/2\/logservice\/service\? - reject
+
+[Body Rewrite]
+http-response-jq ^https:\/\/api\.weibo\.cn\/2\/cardlist\? 'del(.items[] | select(.category == "group"))'
+# 轻享版横幅
+http-response-jq ^https?:\/\/weibointl\.api\.weibo\.cn\/portal\.php\?a=trends& 'del(.data.banner)'
+
+[Map Local]
+# 开屏
+^https?:\/\/bootrealtime\.uve\.weibo\.com\/v\d\/ad\/realtime data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 热门视频、热推荐
+^https?:\/\/api\.weibo\.c(n|om)\/\d\/(cardlist\?v_f=\d|ad\/weibointl\?) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 轻享版：热搜用户、热搜词、私信推广
+^https?:\/\/weibointl\.api\.weibo\.c(n|om)\/portal\.php\?a=hot_search_users data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https?:\/\/weibointl\.api\.weibo\.c(n|om)\/portal\.php\?a=get_searching_info data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https?:\/\/weibointl\.api\.weibo\.c(n|om)\/portal\.php\?a=treehole&auth= data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 首页每日弹窗、超话提示、搜索框推荐词、推送卡片
+^https?:\/\/m?api\.weibo\.c(n|om)\/\d/push\/daily data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https?:\/\/m?api\.weibo\.c(n|om)\/2\/!\/huati\/(discovery_home_bottom_getdotinfo|mobile_discovery_searchchange)\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/m?api\.weibo\.c(n|om)\/2\/!\/huati\/discovery_home_bottom_channels data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/m?api\.weibo\.c(n|om)\/2\/!\/chaohua\/discovery\/home_bottom\/switch data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/m?api\.weibo\.c(n|om)\/2\/!\/was\/finder\/searchbarchange\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/m?api\.weibo\.c(n|om)\/2\/push\/info\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 长文章打赏和推广
+^https:\/\/card\.weibo\.com\/article\/m\/aj\/(reward|uvead)\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/weibo\.com\/ttarticle\/x\/m\/aj\/(reward|uvead)\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+[Script]
+微博发现页 = type=http-response,pattern=^https?:\/\/m?api\.weibo\.c(n|om)\/2\/search\/(finder|container_timeline|container_discover)\?,requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/weibo_ads.js
+微博热搜和话题 = type=http-response,pattern=^https?:\/\/m?api\.weibo\.c(n|om)\/2\/(page|flowpage|searchall)\?,requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/weibo_ads.js
+微博超话 = type=http-response,pattern=^https?:\/\/m?api\.weibo\.c(n|om)\/2\/statuses\/container_timeline_topic(page)?\?,requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/weibo_ads.js
+微博详情页 = type=http-response,pattern=^https?:\/\/m?api\.weibo\.c(n|om)\/2\/statuses\/(extend|container_detail|container_detail_comment|container_detail_mix|container_detail_forward)\?,requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/weibo_ads.js
+微博顶部分组 = type=http-response,pattern=^https?:\/\/m?api\.weibo\.c(n|om)\/2\/groups\/allgroups\/v2,requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/weibo_ads.js
+微博评论区 = type=http-response,pattern=^https?:\/\/m?api\.weibo\.c(n|om)\/2\/comments\/mix_comments\?,requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/weibo_ads.js
+微博转发区 = type=http-response,pattern=^https?:\/\/m?api\.weibo\.c(n|om)\/2\/statuses\/repost_timeline\?,requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/weibo_main.js
+微博信息流和各页推广 = type=http-response,pattern=^https?:\/\/m?api\.weibo\.c(n|om)/2/(cardlist|searchall|page|messageflow|statuses/(unread_)?friends(/|_)timeline|groups/timeline|statuses/(container_timeline|container_timeline_hot|unread_hot_timeline|extend|video_mixtimeline)|profile/(me|container_timeline)|video/(community_tab|remind_info|tiny_stream_video_list)|checkin/show|(\!/)?live/media_homelist|comments/build_comments|container/get_item),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/weibo_main.js
+
+[MITM]
+hostname = %APPEND% api.weibo.cn, api.weibo.com, mapi.weibo.cn, mapi.weibo.com, weibointl.api.weibo.cn, weibointl.api.weibo.com, bootrealtime.uve.weibo.com, card.weibo.com, weibo.com

@@ -1,0 +1,32 @@
+#!name=美团和美团外卖去广告
+#!desc=美团外卖开屏和广告素材，美团系广告和统计域名
+#!category=AdBlock
+#!system=ios
+
+# 规则来自 fmz200/wool_scripts（GPL-3.0）
+
+[Rule]
+DOMAIN-SUFFIX,ad.e.waimai.sankuai.com,REJECT
+DOMAIN-SUFFIX,mads.meituan.com,REJECT
+DOMAIN-SUFFIX,report.meituan.com,REJECT
+DOMAIN-SUFFIX,analytics.meituan.net,REJECT
+DOMAIN-SUFFIX,wmlog.meituan.com,REJECT
+DOMAIN-SUFFIX,dreport.meituan.net,REJECT
+DOMAIN-SUFFIX,d.meituan.net,REJECT
+DOMAIN-SUFFIX,meituan.xn,REJECT
+DOMAIN-SUFFIX,meituan.yoga,REJECT
+DOMAIN-SUFFIX,meituangov.cn,REJECT
+
+[Map Local]
+# 外卖开屏
+^https?:\/\/wmapi\.meituan\.com\/api\/v7\/(?:loadInfo|openscreen|startpicture)\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^http:\/\/59\.82\.113\.10\/amdc\/mobileDispatch\?appkey=213807& data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 广告素材换成透明图
+^https?:\/\/(?:s3plus|flowplus)\.meituan\.net\/v\d\/\w+\/linglong\/\w+\.(?:gif|jpg|mp4) data-type=tiny-gif status-code=200
+^https?:\/\/img\.meituan\.net\/bizad\/bizad_brandCpt_\d+\.jpg data-type=tiny-gif status-code=200
+^https?:\/\/img\.meituan\.net\/goodsawardpic\/[a-f0-9]+\.png\.webp data-type=tiny-gif status-code=200
+^https?:\/\/s3plus\.meituan\.net\/ocean-blk-index\/index\/blk_conf_73\.json data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https?:\/\/s3plus\.meituan\.net\/v1\/mss_\w+\/(?:brandcpt-vedio|waimai-alita)\/\w+\.zip$ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+[MITM]
+hostname = %APPEND% wmapi.meituan.com, img.meituan.net, s3plus.meituan.net, flowplus.meituan.net

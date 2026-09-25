@@ -1,0 +1,64 @@
+#!name=知乎去广告
+#!desc=开屏、首页推荐、热榜、回答页、评论区、搜索页、会员页里的广告和推广
+#!category=AdBlock
+#!system=ios
+
+# 规则和脚本来自 fmz200/wool_scripts（GPL-3.0），脚本存了一份在本仓库 scripts/vendor/fmz200-wool_scripts
+
+[Rule]
+DOMAIN,appcloud.zhihu.com,REJECT
+DOMAIN,appcloud2.in.zhihu.com,REJECT
+DOMAIN,crash2.zhihu.com,REJECT
+DOMAIN,mqtt.zhihu.com,REJECT
+DOMAIN,sugar.zhihu.com,REJECT
+DOMAIN,zxid-m.mobileservice.cn,REJECT
+# 知乎自带的 DNS，挡掉后才会走系统 DNS 被 MITM
+IP-CIDR,103.41.167.237/32,REJECT,no-resolve
+IP-CIDR,118.89.204.198/32,REJECT,no-resolve
+IP-CIDR6,2402:4e00:1200:ed00:0:9089:6dac:96b6/128,REJECT,no-resolve
+
+[URL Rewrite]
+^https:\/\/api\.zhihu\.com\/unlimited\/go\/my_card - reject
+^https:\/\/api\.zhihu\.com\/ab\/api\/v1\/products\/zhihu\/platforms\/ios\/config - reject
+^https:\/\/www\.zhihu\.com\/api\/v4\/hot_recommendation - reject
+^https:\/\/www\.zhihu\.com\/api\/v4\/mcn\/v2\/linkcards\? - reject
+^https:\/\/www\.zhihu\.com\/api\/v4/(?:answers|questions)\/\d+/related-readings - reject
+^https:\/\/www\.zhihu\.com\/commercial_api\/banners_v3\/mobile_banner - reject
+^https:\/\/zhuanlan\.zhihu\.com\/api\/articles\/\d+\/recommendation - reject
+^https:\/\/zhstatic\.zhihu\.com\/brand-ad - reject
+
+[Body Rewrite]
+http-response ^https:\/\/api\.zhihu\.com\/search\/recommend_query\/v2\? "recommend_queries":\{.+\} "recommend_queries":{}
+
+[Map Local]
+# 开屏、顶部横幅、回答底部卡片
+^https:\/\/api\.zhihu\.com\/commercial_api\/(?:answer\/\d+\/bottom-v2|article\/\d+\/bottom-v2|banners_v3\/app_topstory_banner|launch_v2|real_time_launch_v2) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 首页气泡、弹窗
+^https:\/\/api\.zhihu\.com\/content-distribution-core\/bubble\/common\/settings data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/api\.zhihu\.com\/(?:moments\/lastread|drama\/hot-drama-list) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/api\.zhihu\.com\/root\/window data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 会员页弹窗和悬浮图
+^https:\/\/api\.zhihu\.com\/(?:bazaar\/float_window|market\/popovers_v2) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 我的页面推广卡片
+^https:\/\/api\.zhihu\.com\/me\/guides data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 搜索页热词和猜你想搜
+^https:\/\/api\.zhihu\.com\/search\/(hot_search|preset_words) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/www\.zhihu\.com\/api\/v4\/search\/related_queries\/(?:article|answer)\/\d+ data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 回答页：评论区顶部、相关推荐、广告卡片
+^https:\/\/api\.zhihu\.com\/comment_v5\/(?:articles|answers)\/\d+\/list-headers data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/api\.zhihu\.com\/prague\/related_suggestion_native\/feed\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/api\.zhihu\.com\/v5\.1\/topics\/answer\/\d+\/relation data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/api\.zhihu\.com\/ad-style-service\/request data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/appcloud2\.zhihu\.com\/v3\/resource\?group_name=mp data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+^https:\/\/api\.zhihu\.com\/distribute\/rhea\/qa_ad_card\/h5\/recommendation\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+[Script]
+知乎首页 = type=http-response,pattern=^https:\/\/api\.zhihu\.com\/(?:commercial_api\/app_float_layer|feed\/render\/tab\/config\?|moments_v3|topstory\/hot-lists\/total|topstory\/recommend|v2\/topstory\/hot-lists\/everyone-seeing\?|root\/tab),requires-body=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/zhihu.js
+知乎回答页 = type=http-response,pattern=^https:\/\/(?:api|page-info)\.zhihu\.com\/(?:answers|articles)\/v2\/\d+,requires-body=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/zhihu.js
+知乎回答页 = type=http-response,pattern=^https:\/\/api\.zhihu\.com\/(?:next-(?:bff|data|render)|questions\/\d+(?:\/answers|\/feeds|\?include=)),requires-body=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/zhihu.js
+知乎回答页 = type=http-response,pattern=^https:\/\/www\.zhihu\.com\/api\/v4\/(?:articles|answers)\/\d+\/recommendations?\?,requires-body=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/zhihu.js
+知乎会员页 = type=http-response,pattern=^https:\/\/api\.zhihu\.com\/bazaar\/vip_tab\/header\?,requires-body=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/zhihu.js
+知乎推送配置 = type=http-response,pattern=^https:\/\/(?:appcloud2\.zhihu\.com\/v3\/config|m-cloud\.zhihu\.com\/api\/cloud\/config\/all\?),requires-body=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/zhihu.js
+
+[MITM]
+hostname = %APPEND% api.zhihu.com, www.zhihu.com, appcloud2.zhihu.com, m-cloud.zhihu.com, zhuanlan.zhihu.com, page-info.zhihu.com, zhstatic.zhihu.com
