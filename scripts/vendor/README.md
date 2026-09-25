@@ -7,8 +7,6 @@
 | `kokoryh-Sparkle/` | [kokoryh/Sparkle](https://github.com/kokoryh/Sparkle) `dist/` | GPL-3.0 | `1bc5b545a544d7d59b1cf821785daddc3868e4a5`（2026-09-14） |
 | `Maasea-sgmodule/` | [Maasea/sgmodule](https://github.com/Maasea/sgmodule) `Script/Youtube/` | Apache-2.0 | `65075cdb388fc5e3094afd7e7314c67b243f3525`（2026-07-19） |
 | `AdguardTeam-PopupBlocker/` | [AdguardTeam/PopupBlocker](https://github.com/AdguardTeam/PopupBlocker) 官方构建的 `popupblocker.user.js` 2.5.117 | LGPL-3.0 | `d05ebd36da54e86ba75df19565db80f1d510f591`（2026-09-17） |
-| `DualSubs-YouTube/` | [DualSubs/YouTube](https://github.com/DualSubs/YouTube) Release v1.5.11 的 `request.bundle.js`、`response.bundle.js` | Apache-2.0 | `eef33df77dfab97dcbcb6e346a36c55a8d97e3f0`（2024-12-11） |
-| `DualSubs-Universal/` | [DualSubs/Universal](https://github.com/DualSubs/Universal) Release v1.7.5 的 `Translate.response.bundle.js`、`Composite.Subtitles.response.bundle.js` | Apache-2.0 | `331292a743fcd2e03681373f747b51ab080e4ad0`（2025-11-23） |
 | `fmz200-wool_scripts/` | [fmz200/wool_scripts](https://github.com/fmz200/wool_scripts) `Scripts/` | GPL-3.0 | `3ca7487b4e4b86d9af76e50df72c62eacfbb659e`（2026-09-10） |
 
 每个目录里的 `LICENSE` 是上游的许可证原文。脚本内容没有改过。
@@ -28,11 +26,6 @@ cp /tmp/wool_scripts/Scripts/{xiaohongshu/xiaohongshu.js,weibo/weibo_ads.js,weib
 curl -o scripts/vendor/AdguardTeam-PopupBlocker/popupblocker.user.js https://userscripts.adtidy.org/release/popup-blocker/2.5/popupblocker.user.js
 python3 tools/build_web.py && node tools/test_web.js   # Popup Blocker 更新后重新打包、测试
 
-curl -L -o scripts/vendor/DualSubs-YouTube/request.bundle.js https://github.com/DualSubs/YouTube/releases/latest/download/request.bundle.js
-curl -L -o scripts/vendor/DualSubs-YouTube/response.bundle.js https://github.com/DualSubs/YouTube/releases/latest/download/response.bundle.js
-curl -L -o scripts/vendor/DualSubs-Universal/Translate.response.bundle.js https://github.com/DualSubs/Universal/releases/latest/download/Translate.response.bundle.js
-curl -L -o scripts/vendor/DualSubs-Universal/Composite.Subtitles.response.bundle.js https://github.com/DualSubs/Universal/releases/latest/download/Composite.Subtitles.response.bundle.js
-
 git diff scripts/vendor   # 看清楚改了什么再提交，顺手更新上面表格里的提交号
 ```
 
@@ -41,4 +34,4 @@ git diff scripts/vendor   # 看清楚改了什么再提交，顺手更新上面�
 - `bilibili.protobuf.response.js` 的 `sponsorBlock` 打开时，会把哔哩哔哩要下载的播放器插件包换成 kokoryh/chronos 仓库里的版本。`ads/bilibili.sgmodule` 里固定传的是 `false`，别改。
 - Maasea 的 `youtube.request.js` 没有复制：它会把 YouTube 播放请求重定向到作者自己的 Cloudflare Worker。
 - Popup Blocker 不是直接加载的，由 `tools/build_web.py` 打包进 `scripts/web/inject.js`。原本依赖的用户脚本管理器接口换成了 localStorage 版本，字体资源不加载。
-- DualSubs 的设置通过模块参数传入（包括 DeepL key），没有用 BoxJs。检查过打包脚本，只会连翻译服务商（Google、Microsoft、DeepL 等）。
+

@@ -10,7 +10,7 @@
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
-| YouTube 双语字幕 | YouTube 字幕、YouTube Music 歌词加中文翻译，用 DeepL | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
+| YouTube 双语字幕 | YouTube 字幕加 DeepL 翻译，多个 key 自动切换，Apple TV 也能装 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
 
 ## 代理流量面板
 
@@ -219,31 +219,56 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sg
 https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule
 ```
 
-YouTube 视频字幕和 YouTube Music 歌词下面加一行中文翻译。基于 [DualSubs](https://github.com/DualSubs)（Apache-2.0），脚本存在 `scripts/vendor/DualSubs-*`。
+YouTube 字幕下面加一行 DeepL 翻译。脚本是自己写的：`scripts/youtube-subtitles.js`。
 
 ### 用法
 
-1. 装模块，在模块参数「DeepL密钥」里填你的 DeepL API Free key（以 `:fx` 结尾）。
-2. 打开 YouTube 视频，在字幕里选带「翻译」的那一项。「自动显示字幕」开着的话会自动打开。
+1. 装模块，在参数「DeepL密钥」里填 key，多个用 `|` 分隔，比如 `key1:fx|key2:fx|key3:fx`。
+2. 在 YouTube 里打开原文字幕（比如英文），就会变成双语。
+3. YouTube 自带的「自动翻译」字幕和本来就是中文的字幕不会再翻。
+
+### 多个 key 怎么切换
+
+按填写顺序用，上次成功的 key 优先。某个 key 出错就马上换下一个，并按错误暂停它：
+
+| 情况 | 暂停多久 |
+| --- | --- |
+| 403 key 无效 | 7 天 |
+| 456 额度用完 | 24 小时后再试 |
+| 429 请求太多 | 1 分钟 |
+| 5xx 服务器出错 | 5 分钟 |
+| 网络错误 | 不暂停，直接换下一个 |
+
+所有 key 都不能用时，默认用 Google 翻译兜底；Google 也不行就保持原字幕，不影响播放。
+
+另外：
+- 以 `:fx` 结尾的 Free key 走 `api-free.deepl.com`，其他当 Pro key 走 `api.deepl.com`。
+- 同一个视频的翻译会缓存（最近 3 个视频），拖进度条、重新打开字幕不重复花额度。
+- 状态里只存 key 的指纹，不存明文。
+- 打开「调试日志」可以在 Surge 日志里看到每次请求和 key 的切换。
 
 ### 参数
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
-| DeepL密钥 | 空 | 必填，否则翻译失败 |
-| 翻译服务 | DeepL | 改成 Google 就不用 key |
-| 目标语言 | ZH | 也可以填 EN、JA、KO 等 |
-| 字幕类型 | Translate | 改成 Official 用 YouTube 自带的机器翻译，不用 key |
-| 原文位置 | Forward | Forward 原文在上，Reverse 原文在下 |
-| 自动显示字幕 | true | |
-| 只显示译文 | false | true 就不显示原文 |
+| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
+| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
+| 原文位置 | top | top 原文在上；bottom 译文在上；only 只显示译文 |
+| 备用翻译 | google | off 表示不用 Google 兜底 |
+| 调试日志 | false | true 打印详细日志 |
 
-### 需要知道的
+### Apple TV
 
-- DeepL key 只会发给 `api-free.deepl.com`。key 存在 Surge 的模块参数里，不会进仓库。
-- DeepL Free 每个月 50 万字符，一般够看很多视频。用完了当月会翻译失败，可以临时把「翻译服务」改成 Google。
-- 只支持填一个 key。DeepL 的条款是一人一个免费账号，这里没做多个 key 轮换。
-- 要 MITM YouTube 的域名。和「App 去广告合集」里的 YouTube 去广告可以一起装；如果字幕选项不出现，先关掉合集确认是不是冲突。
+脚本改的是 YouTube 下发的字幕文件，不改播放器，理论上 iPhone、iPad、Apple TV 的 YouTube App 都适用。但 Apple TV 我没法实测，需要你确认两件事：
+
+1. Apple TV 上的 Surge 要能 MITM：Surge 的 CA 证书要装到 Apple TV 上并信任，MITM 开关打开。
+2. Apple TV 版 YouTube 的字幕也是走 `/api/timedtext`：把「调试日志」改成 `true`，放一个开了英文字幕的视频，看 Surge 的请求记录或日志里有没有 `timedtext`。有就能用；没有的话把请求记录里和字幕相关的地址发我，我再适配。
+
+### 其他
+
+- 支持 YouTube 的三种字幕格式：json3、srv3 / srv1 XML、WebVTT。自动生成字幕会把逐词的片段合成整句再翻。
+- 测试：`node tools/test_subtitles.js`，模拟 Surge 和 DeepL / Google 接口，覆盖 key 切换、暂停、兜底、缓存、分批和三种字幕格式。
+- DeepL 的条款是一人一个免费账号，多个免费账号轮着用超出额度违反条款，账号可能被封，自己把握。
 
 ## 规矩
 
