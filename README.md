@@ -9,6 +9,7 @@
 | 代理流量面板 | 在面板里显示剩余流量、已用比例、到期日期和重置时间 | `https://raw.githubusercontent.com/justyura/surge-modules/main/usage-pane.sgmodule` |
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
+| 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
 
 ## 代理流量面板
 
@@ -195,6 +196,21 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodul
 | AdGuard 过滤列表 | Safari 内容拦截器用的元素隐藏规则 | 「网页脚本」的元素隐藏 |
 | AdGuard Popup Blocker | 用户脚本，拦 JS 弹出的新窗口 | 「网页脚本」的 Popup Blocker |
 | Adblock4limbo | MITM 四百多个站点注入 JS，主要针对影视站 | 没用，范围太大 |
+
+## 搜索引擎重定向
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule
+```
+
+在 Safari 地址栏搜索，或者打开这些搜索引擎的结果页时，直接 302 跳到 `https://search.wtyura.com/search?q=搜索词`。
+
+支持：Google（含各国域名）、Kagi、DuckDuckGo、Bing、Yahoo、Brave Search、Ecosia、Startpage、Yandex、百度、搜狗、360 搜索。
+
+- 只跳搜索结果页。搜索建议、首页、地图、账号页都不动。
+- 要开 MITM，上面这些搜索引擎的域名会被解密。
+- 换成别的搜索地址：改模块参数「搜索地址」，搜索词会直接拼在后面。
+- 想临时用回原来的搜索引擎，在 Surge 里关掉这个模块。
 
 ## 规矩
 
