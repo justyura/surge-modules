@@ -1,0 +1,37 @@
+# 网页模块里要注入脚本（元素隐藏、弹窗清理、Popup Blocker）的网站
+# 一行一个完整域名，不含子域名：要管 m.example.com 就写 m.example.com
+# 改完跑 python3 tools/build_web.py，重新生成 web-popups.sgmodule 和 scripts/web/inject.js
+#
+# 这些域名会被 MITM。只加你在 Safari 里经常访问、又被弹窗烦到的网站
+
+# X / Twitter：「Get the full app experience」弹窗、登录提示、下载 App 横幅
+x.com
+twitter.com
+mobile.twitter.com
+
+# Reddit：「在 App 中打开」
+www.reddit.com
+
+# 知乎：打开 App、登录弹窗
+www.zhihu.com
+zhuanlan.zhihu.com
+
+# 微博
+m.weibo.cn
+
+# 哔哩哔哩
+m.bilibili.com
+
+# 小红书
+www.xiaohongshu.com
+
+# 豆瓣
+m.douban.com
+www.douban.com
+
+# 百度贴吧
+tieba.baidu.com
+
+# 简书、CSDN
+www.jianshu.com
+blog.csdn.net

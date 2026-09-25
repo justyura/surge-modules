@@ -6,7 +6,7 @@ Surge 的 DOMAIN-SET 里域名前面要加 "." 才会匹配子域名，所以这
 
     python3 tools/update_popupads.py
 
-GitHub Actions 每天跑一次（.github/workflows/update-popupads.yml）。
+GitHub Actions 每天跑一次（.github/workflows/update-web-rules.yml）。
 """
 import sys
 import urllib.request

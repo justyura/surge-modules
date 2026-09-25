@@ -1,4 +1,4 @@
-name: 更新弹窗广告列表
+name: 更新网页规则
 
 on:
   schedule:
@@ -13,12 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 tools/update_popupads.py
+      - name: 弹窗广告列表（HaGeZi）
+        run: python3 tools/update_popupads.py
+      - name: 网页脚本（AdGuard 元素隐藏规则）
+        run: python3 tools/build_web.py
       - name: 有变化就提交
         run: |
-          git diff --quiet rules/ && exit 0
+          git add rules/ scripts/web/inject.js web-popups.sgmodule
+          git diff --cached --quiet && exit 0
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rules/
-          git commit -m "chore: update hagezi popup ads list"
+          git commit -m "chore: update web rules"
           git push
