@@ -10,6 +10,7 @@
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
+| YouTube 双语字幕 | YouTube 字幕、YouTube Music 歌词加中文翻译，用 DeepL | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
 
 ## 代理流量面板
 
@@ -211,6 +212,38 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sg
 - 要开 MITM，上面这些搜索引擎的域名会被解密。
 - 换成别的搜索地址：把模块里的 `https://search.wtyura.com/search?q=` 全部换掉。
 - 想临时用回原来的搜索引擎，在 Surge 里关掉这个模块。
+
+## YouTube 双语字幕
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule
+```
+
+YouTube 视频字幕和 YouTube Music 歌词下面加一行中文翻译。基于 [DualSubs](https://github.com/DualSubs)（Apache-2.0），脚本存在 `scripts/vendor/DualSubs-*`。
+
+### 用法
+
+1. 装模块，在模块参数「DeepL密钥」里填你的 DeepL API Free key（以 `:fx` 结尾）。
+2. 打开 YouTube 视频，在字幕里选带「翻译」的那一项。「自动显示字幕」开着的话会自动打开。
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| DeepL密钥 | 空 | 必填，否则翻译失败 |
+| 翻译服务 | DeepL | 改成 Google 就不用 key |
+| 目标语言 | ZH | 也可以填 EN、JA、KO 等 |
+| 字幕类型 | Translate | 改成 Official 用 YouTube 自带的机器翻译，不用 key |
+| 原文位置 | Forward | Forward 原文在上，Reverse 原文在下 |
+| 自动显示字幕 | true | |
+| 只显示译文 | false | true 就不显示原文 |
+
+### 需要知道的
+
+- DeepL key 只会发给 `api-free.deepl.com`。key 存在 Surge 的模块参数里，不会进仓库。
+- DeepL Free 每个月 50 万字符，一般够看很多视频。用完了当月会翻译失败，可以临时把「翻译服务」改成 Google。
+- 只支持填一个 key。DeepL 的条款是一人一个免费账号，这里没做多个 key 轮换。
+- 要 MITM YouTube 的域名。和「App 去广告合集」里的 YouTube 去广告可以一起装；如果字幕选项不出现，先关掉合集确认是不是冲突。
 
 ## 规矩
 
