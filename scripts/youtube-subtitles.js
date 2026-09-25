@@ -15,17 +15,23 @@
  *   target    目标语言，DeepL 的写法，比如 ZH-HANS、ZH-HANT、EN-US、JA
  *   position  top：原文在上；bottom：原文在下；only：只显示译文
  *   fallback  google：全部 key 失败时用 Google 翻译；off：不兜底
+ *   budget    最多等几秒（默认 8）。到时间就先返回翻好的部分，没翻完的显示原文；
+ *             翻好的会缓存，重新打开字幕会接着翻剩下的
  *   debug     true：在 Surge 日志里打印每次请求的细节
  */
 
 var STORE_KEY = 'yt-subtitles-deepl';
-var BATCH = 50;            // DeepL 一次最多 50 段
-var CACHE_VIDEOS = 3;      // 缓存最近几个视频的翻译，拖动进度条时不重复花额度
+var CUES_PER_TEXT = 40;          // 多少句字幕打包成一段发给 DeepL（用 <t> 标签隔开）
+var CHARS_PER_TEXT = 3000;
+var TEXTS_PER_REQUEST = 50;      // DeepL 一次最多 50 段
+var BYTES_PER_REQUEST = 100000;  // DeepL 单次请求上限 128 KiB，留点余量
+var PARALLEL = 3;                // 同时发几个请求
+var CACHE_VIDEOS = 3;            // 缓存最近几个视频的翻译，拖进度条、重开字幕不重复花额度
 
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
 
 function parseArgs(raw) {
-  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', debug: 'false' };
+  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -35,15 +41,20 @@ function parseArgs(raw) {
   });
   args.keyList = args.keys.split(/[|;,\s]+/).filter(function (k) { return /^[\w-]+(:fx)?$/i.test(k) && k.length > 20; });
   args.target = args.target.toUpperCase();
+  args.budget = Math.min(50, Math.max(3, Number(args.budget) || 8));
   args.debug = args.debug === 'true';
   return args;
 }
 
 var ARGS = parseArgs(typeof $argument === 'undefined' ? '' : $argument);
+var DEADLINE = Date.now() + ARGS.budget * 1000;
 
 function log() {
   if (ARGS.debug) console.log('[YouTube 字幕] ' + Array.prototype.join.call(arguments, ' '));
 }
+
+// 离截止时间还剩几秒
+function remaining() { return (DEADLINE - Date.now()) / 1000; }
 
 // ---------- 状态：暂停中的 key、当前在用的 key、翻译缓存 ----------
 
@@ -71,33 +82,28 @@ function now() { return Math.floor(Date.now() / 1000); }
 
 // ---------- HTTP ----------
 
-function post(options) {
+function request(method, options) {
   return new Promise(function (resolve) {
-    $httpClient.post(options, function (error, response, body) {
+    $httpClient[method](options, function (error, response, body) {
       resolve({ error: error, status: response ? (response.status || response.statusCode) : 0, body: body });
     });
   });
 }
 
-function get(options) {
-  return new Promise(function (resolve) {
-    $httpClient.get(options, function (error, response, body) {
-      resolve({ error: error, status: response ? (response.status || response.statusCode) : 0, body: body });
-    });
-  });
-}
+function timeout() { return Math.max(2, Math.min(10, Math.floor(remaining()))); }
 
-// ---------- 翻译 ----------
+// ---------- DeepL ----------
 
-function deeplOnce(key, texts, source) {
+function deeplOnce(key, texts, source, xml) {
   var host = /:fx$/i.test(key) ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
   var body = { text: texts, target_lang: ARGS.target, preserve_formatting: true };
+  if (xml) body.tag_handling = 'xml';
   if (source) body.source_lang = source;
-  return post({
+  return request('post', {
     url: host + '/v2/translate',
     headers: { Authorization: 'DeepL-Auth-Key ' + key, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    timeout: 15,
+    timeout: timeout(),
   }).then(function (r) {
     if (r.error || r.status !== 200) return { ok: false, status: r.error ? 0 : r.status };
     try {
@@ -109,30 +115,92 @@ function deeplOnce(key, texts, source) {
   });
 }
 
-// 按顺序试 key：先用上次成功的那个，出错就换下一个
-function deepl(texts, source, state) {
+// 按顺序试 key：先用上次成功的那个，出错就换下一个。返回译文数组，全部失败返回 null
+async function deepl(texts, source, state, xml) {
   var keys = ARGS.keyList.slice();
   var start = keys.indexOf(state.current);
   if (start > 0) keys = keys.slice(start).concat(keys.slice(0, start));
-  var t = now();
-  keys = keys.filter(function (k) { return !(state.paused[fingerprint(k)] > t); });
-
-  function attempt(i) {
-    if (i >= keys.length) return Promise.resolve(null);
+  for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
-    return deeplOnce(key, texts, source).then(function (r) {
-      if (r.ok) {
-        state.current = key;
-        return r.list;
-      }
-      var pause = PAUSE[r.status] || (r.status >= 500 ? PAUSE[5] : 0);
-      log('key ' + fingerprint(key) + ' 失败，状态码 ' + r.status + (pause ? '，暂停 ' + pause + ' 秒' : ''));
-      if (pause) state.paused[fingerprint(key)] = now() + pause;
-      return attempt(i + 1);
-    });
+    if (state.paused[fingerprint(key)] > now()) continue;
+    if (remaining() < 1) return null;
+    var r = await deeplOnce(key, texts, source, xml);
+    if (r.ok) {
+      state.current = key;
+      return r.list;
+    }
+    var pause = PAUSE[r.status] || (r.status >= 500 ? PAUSE[5] : 0);
+    log('key ' + fingerprint(key) + ' 失败，状态码 ' + r.status + (pause ? '，暂停 ' + pause + ' 秒' : ''));
+    if (pause) state.paused[fingerprint(key)] = now() + pause;
   }
-  return attempt(0);
+  return null;
 }
+
+// 几十句字幕打包成一段：<t>句1</t><t>句2</t>…，DeepL 按 XML 处理会保留标签，
+// 一次请求能翻上千句，而且能看到上下文
+function escapeTag(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function unescapeTag(s) {
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+}
+
+function pack(cues) {
+  var units = [];
+  var unit = null;
+  cues.forEach(function (cue) {
+    var piece = '<t>' + escapeTag(cue) + '</t>';
+    if (!unit || unit.cues.length >= CUES_PER_TEXT || unit.text.length + piece.length > CHARS_PER_TEXT) {
+      unit = { cues: [], text: '' };
+      units.push(unit);
+    }
+    unit.cues.push(cue);
+    unit.text += piece;
+  });
+  return units;
+}
+
+function unpack(unit, translated) {
+  var parts = [];
+  String(translated || '').replace(/<t>([\s\S]*?)<\/t>/g, function (m, inner) { parts.push(unescapeTag(inner).trim()); return m; });
+  return parts.length === unit.cues.length ? parts : null;
+}
+
+function utf8Length(text) {
+  var n = 0;
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charCodeAt(i);
+    n += c < 0x80 ? 1 : c < 0x800 ? 2 : (c >= 0xd800 && c <= 0xdbff) ? (i++, 4) : 3;
+  }
+  return n;
+}
+
+// 把打包好的段落再分成请求：每个请求最多 50 段、不超过 100 KB
+function group(units) {
+  var requests = [];
+  var current = null;
+  units.forEach(function (unit) {
+    var size = utf8Length(unit.text) + 16;  // 加上 JSON 引号、逗号和转义的余量
+    if (!current || current.units.length >= TEXTS_PER_REQUEST || current.size + size > BYTES_PER_REQUEST) {
+      current = { units: [], size: 0 };
+      requests.push(current);
+    }
+    current.units.push(unit);
+    current.size += size;
+  });
+  return requests;
+}
+
+// 并发跑一组任务，截止时间到了就不再开始新的
+async function parallel(tasks, limit, run) {
+  var next = 0;
+  async function worker() {
+    while (next < tasks.length && remaining() > 1) await run(tasks[next++]);
+  }
+  var workers = [];
+  for (var i = 0; i < Math.min(limit, tasks.length); i++) workers.push(worker());
+  await Promise.all(workers);
+}
+
+// ---------- Google 兜底 ----------
 
 function googleTarget() {
   var t = ARGS.target;
@@ -141,55 +209,80 @@ function googleTarget() {
   return t.split('-')[0].toLowerCase();
 }
 
-// Google 兜底：一段一段翻，并发 5 个
-function google(texts) {
-  var out = new Array(texts.length);
-  var next = 0;
-  function worker() {
-    if (next >= texts.length) return Promise.resolve();
-    var i = next++;
-    return get({
-      url: 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=' + googleTarget() + '&q=' + encodeURIComponent(texts[i]),
-      timeout: 10,
-    }).then(function (r) {
-      try {
-        out[i] = JSON.parse(r.body)[0].map(function (seg) { return seg[0]; }).join('');
-      } catch (e) {
-        out[i] = '';
-      }
-      return worker();
+// 多句用换行拼成一段发过去，按换行拆回来；数量对不上的这一段就放弃
+async function google(cues, result) {
+  var chunks = [];
+  var chunk = [];
+  var length = 0;
+  cues.forEach(function (cue) {
+    var line = cue.replace(/\n/g, ' ');
+    if (chunk.length && length + line.length > 3500) { chunks.push(chunk); chunk = []; length = 0; }
+    chunk.push(cue);
+    length += line.length + 1;
+  });
+  if (chunk.length) chunks.push(chunk);
+  await parallel(chunks, 4, async function (lines) {
+    var q = lines.map(function (l) { return l.replace(/\n/g, ' '); }).join('\n');
+    var r = await request('get', {
+      url: 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=' + googleTarget() + '&q=' + encodeURIComponent(q),
+      timeout: timeout(),
     });
-  }
-  var workers = [];
-  for (var w = 0; w < 5; w++) workers.push(worker());
-  return Promise.all(workers).then(function () { return out; });
+    try {
+      var out = JSON.parse(r.body)[0].map(function (seg) { return seg[0]; }).join('').split('\n');
+      if (out.length !== lines.length) return;
+      lines.forEach(function (line, i) { if (out[i].trim()) result[line] = out[i].trim(); });
+    } catch (e) {}
+  });
 }
 
-// 翻译一组不重复的文本，返回 { 原文: 译文 }
-function translateAll(texts, source, state, cached) {
-  var todo = texts.filter(function (t) { return !(t in cached); });
+// ---------- 翻译调度 ----------
+
+// 翻译一组不重复的文本，返回 { 原文: 译文 }。到截止时间就把已经翻好的返回
+async function translateAll(texts, source, state, cached) {
   var result = {};
   Object.keys(cached).forEach(function (k) { result[k] = cached[k]; });
-  var batches = [];
-  for (var i = 0; i < todo.length; i += BATCH) batches.push(todo.slice(i, i + BATCH));
-  log('共 ' + texts.length + ' 段，缓存命中 ' + (texts.length - todo.length) + ' 段，分 ' + batches.length + ' 批翻译');
+  var todo = texts.filter(function (t) { return !(t in result); });
+  var requests = group(pack(todo));
+  log('共 ' + texts.length + ' 句，缓存命中 ' + (texts.length - todo.length) + ' 句，打包成 ' + requests.length + ' 个请求，限时 ' + ARGS.budget + ' 秒');
 
-  var deeplDown = false;
-  return batches.reduce(function (chain, batch) {
-    return chain.then(function () {
-      var viaDeepl = deeplDown ? Promise.resolve(null) : deepl(batch, source, state);
-      return viaDeepl.then(function (list) {
-        if (list) return list;
-        deeplDown = true;
-        if (ARGS.fallback !== 'google') return null;
-        log('DeepL 全部不可用，改用 Google');
-        return google(batch);
-      }).then(function (list) {
-        if (!list) return;
-        batch.forEach(function (text, j) { if (list[j]) result[text] = list[j]; });
-      });
+  var loose = [];     // 标签对不上的句子，单独再翻
+  var leftover = [];  // DeepL 不可用时留给 Google 的句子
+  var deeplDown = !ARGS.keyList.length;
+
+  await parallel(requests, PARALLEL, async function (req) {
+    var list = deeplDown ? null : await deepl(req.units.map(function (u) { return u.text; }), source, state, true);
+    if (!list) {
+      if (remaining() > 1) deeplDown = true;
+      req.units.forEach(function (u) { leftover.push.apply(leftover, u.cues); });
+      return;
+    }
+    req.units.forEach(function (unit, i) {
+      var parts = unpack(unit, list[i]);
+      if (parts) unit.cues.forEach(function (cue, j) { if (parts[j]) result[cue] = parts[j]; });
+      else loose.push.apply(loose, unit.cues);
     });
-  }, Promise.resolve()).then(function () { return result; });
+  });
+
+  if (loose.length && !deeplDown) {
+    log(loose.length + ' 句标签没对上，逐句重翻');
+    var batches = [];
+    for (var i = 0; i < loose.length; i += TEXTS_PER_REQUEST) batches.push(loose.slice(i, i + TEXTS_PER_REQUEST));
+    await parallel(batches, PARALLEL, async function (batch) {
+      var list = await deepl(batch, source, state, false);
+      if (list) batch.forEach(function (cue, j) { if (list[j]) result[cue] = list[j]; });
+      else leftover.push.apply(leftover, batch);
+    });
+  } else {
+    leftover.push.apply(leftover, loose);
+  }
+
+  leftover = leftover.filter(function (t) { return !(t in result); });
+  if (leftover.length && ARGS.fallback === 'google' && remaining() > 1) {
+    log('DeepL 不可用，' + leftover.length + ' 句改用 Google');
+    await google(leftover, result);
+  }
+  log('翻好 ' + Object.keys(result).length + ' / ' + texts.length + ' 句，剩余时间 ' + remaining().toFixed(1) + ' 秒');
+  return result;
 }
 
 // ---------- 字幕格式 ----------
@@ -309,7 +402,8 @@ function main() {
   var handler = FORMATS[format];
   var doc = handler.parse(body);
   var texts = handler.texts(doc);
-  var unique = texts.filter(function (t, i) { return t && texts.indexOf(t) === i; });
+  var seen = {};
+  var unique = texts.filter(function (t) { if (!t || seen[t]) return false; seen[t] = true; return true; });
   if (!unique.length) return Promise.resolve(null);
 
   var state = loadState();
@@ -329,9 +423,19 @@ function main() {
   });
 }
 
-main().then(function (out) {
+var finished = false;
+var guard = null;
+function finish(out) {
+  if (finished) return;
+  finished = true;
+  clearTimeout(guard);
   $done(out ? { body: out } : {});
-}, function (error) {
+}
+
+// 兜底：无论哪里卡住，超过限时 3 秒就原样返回字幕，保证字幕能加载出来
+guard = setTimeout(function () { log('超时，原样返回'); finish(null); }, (ARGS.budget + 3) * 1000);
+
+main().then(finish, function (error) {
   log('出错：' + (error && error.message));
-  $done({});
+  finish(null);
 });
