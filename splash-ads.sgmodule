@@ -1,0 +1,31 @@
+#!name=国内 App 开屏去广告
+#!desc=去掉哔哩哔哩、小红书、微博、知乎的开屏广告。装好后把 App 彻底关掉再打开，不生效就清一下 App 缓存
+#!category=AdBlock
+#!system=ios
+
+[Rule]
+# 小红书：广告图片和视频 CDN
+DOMAIN,ads-img-qc.xhscdn.com,REJECT
+DOMAIN,ads-video-al.xhscdn.com,REJECT
+DOMAIN,ads-video-qc.xhscdn.com,REJECT
+DOMAIN,t-ads.xiaohongshu.com,REJECT
+# 微博：开屏预加载
+DOMAIN,bootpreload.uve.weibo.com,REJECT
+DOMAIN-SUFFIX,sdkapp.uve.weibo.com,REJECT
+
+[Map Local]
+# 微博：实时开屏
+^https?:\/\/bootrealtime\.uve\.weibo\.com\/v\d\/ad\/realtime data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+# 知乎：开屏
+^https:\/\/api\.zhihu\.com\/commercial_api\/(?:launch_v2|real_time_launch_v2) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
+
+[Script]
+# 哔哩哔哩：开屏列表、开屏展示、活动开屏（脚本来自 kokoryh/Sparkle）
+哔哩哔哩开屏 = type=http-response,pattern=^https:\/\/app\.bilibili\.com\/x\/v2\/splash\/(?:list|show|event\/list2)\?,requires-body=1,max-size=-1,engine=webview,script-path=https://raw.githubusercontent.com/kokoryh/Sparkle/refs/heads/master/dist/bilibili.json.js
+# 小红书：开屏配置（脚本来自 fmz200/wool_scripts）
+小红书开屏 = type=http-response,pattern=^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/system_service\/(?:config\?|splash_config),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/xiaohongshu/xiaohongshu.js
+# 微博：客户端开屏（脚本来自 zmqcherish/proxy-script）
+微博开屏 = type=http-response,pattern=^https?:\/\/wbapp\.uve\.weibo\.com\/wbapplua\/wbpullad\.lua,requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/zmqcherish/proxy-script/main/weibo_launch.js
+
+[MITM]
+hostname = %APPEND% app.bilibili.com, edith.xiaohongshu.com, bootrealtime.uve.weibo.com, wbapp.uve.weibo.com, api.zhihu.com
