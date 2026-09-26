@@ -76,7 +76,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 | App | 去掉什么 |
 | --- | --- |
 | 哔哩哔哩 | 开屏、首页推荐、动态、视频页、评论区、直播、搜索 |
-| YouTube | 首页、搜索、播放页、Shorts 里的广告，片头广告；YouTube Music 也管 |
+| YouTube | 首页、搜索、播放页、Shorts 里的广告，片头和中途插播广告；YouTube Music、Apple TV 也管 |
 | 抖音 | 只能拦广告投放和素材域名，信息流广告去不掉 |
 | 小红书 | 开屏、首页和关注页信息流、搜索页、详情页 |
 | Twitter / X | 只能拦广告和统计域名，时间线里的推广帖目前没有可用规则 |
@@ -102,6 +102,23 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 哔哩哔哩有几个参数可以调：动态最常访问、创作中心、过滤置顶评论广告、日志等级，在模块参数里改。
 
 某个 App 用着有问题，想单独关掉它：先卸载合集，再从 `ads/` 里挑需要的单个模块装，每个文件都能单独用。
+
+### Apple TV 上用
+
+电视上只装 YouTube 这一个就行，不用装整个合集：
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/ads/youtube.sgmodule
+```
+
+1. Apple TV 的 Surge 里打开 MITM，生成并安装证书，再到 Apple TV 的 设置 → 通用 → 关于本机 → 证书信任设置 里打开信任。
+2. 装上面的模块。
+3. 彻底退出 YouTube 再打开，看几个视频。
+
+能去的：首页和搜索里的广告、片头广告、播放中途插播的广告、广告统计请求。
+
+- Apple TV 上的 Surge 只有 JavaScriptCore，没有 `TextEncoder` / `TextDecoder`。去广告脚本自带补丁，已经在没有这两个的环境里跑过，能正常执行。
+- Apple TV 版 YouTube 的接口我没法实测。YouTube 经常改服务端，有人反馈 MITM 去广告会间歇失效。还有广告的话告诉我是哪种（片头、中途、首页），我再对着改。
 
 ### 怎么维护
 

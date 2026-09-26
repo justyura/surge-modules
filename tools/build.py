@@ -54,7 +54,6 @@ def main():
         "#!name=App 去广告合集",
         "#!desc=" + "、".join(names) + "。开屏和 App 内的广告、推广一起去",
         "#!category=AdBlock",
-        "#!system=ios",
     ]
     if arguments:
         out.append("#!arguments=" + ",".join(arguments))
