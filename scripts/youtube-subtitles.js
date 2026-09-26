@@ -158,9 +158,14 @@ function pack(cues) {
   return units;
 }
 
+// DeepL 按整段翻译时，偶尔会把上一句末尾的标点挪到下一句开头，去掉
+function cleanup(text) {
+  return text.trim().replace(/^[，,、；;。]+\s*/, '');
+}
+
 function unpack(unit, translated) {
   var parts = [];
-  String(translated || '').replace(/<t>([\s\S]*?)<\/t>/g, function (m, inner) { parts.push(unescapeTag(inner).trim()); return m; });
+  String(translated || '').replace(/<t>([\s\S]*?)<\/t>/g, function (m, inner) { parts.push(cleanup(unescapeTag(inner))); return m; });
   return parts.length === unit.cues.length ? parts : null;
 }
 
