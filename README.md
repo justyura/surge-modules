@@ -112,7 +112,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-tv.sgmodule
 ```
 
-电视版 YouTube 对 `www.youtube.com` 做了证书锁定（Surge 日志：`Client closed connection just after TLS handshake, it might because of certificate pinning`），解密它 YouTube 就打不开。电视专用版只解密 `youtubei.googleapis.com` 和 `*.googlevideo.com`，所以少了拦广告统计的两条。「YouTube 双语字幕」也要解密 `www.youtube.com`，电视上先别装。
+电视版 YouTube 对 `www.youtube.com` 和 `*.googlevideo.com` 做了证书锁定（Surge 日志：`Client closed connection just after TLS handshake, it might because of certificate pinning`），解密它们 YouTube 就打不开、视频放不了。电视专用版只解密 `youtubei.googleapis.com`：能去首页、搜索、播放页接口里的广告和中途插播请求；播放数据走的 googlevideo 碰不了，如果广告是跟着视频流一起下发的就去不掉。「YouTube 双语字幕」也要解密 `www.youtube.com`，电视上先别装。
 
 1. 装证书（见下面「Apple TV 装证书」）。
 2. 装上面的模块。
