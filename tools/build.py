@@ -14,10 +14,6 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "ads"
 OUT = ROOT / "adblock.sgmodule"
 
-# YouTube 的 response 脚本在 Apple TV 上缺 TextEncoder/TextDecoder，打包时在前面补上
-YT_VENDOR = ROOT / "scripts" / "vendor" / "gholts-surge" / "response.js"
-YT_COMPAT = ROOT / "scripts" / "compat" / "text-codec.js"
-YT_OUT = ROOT / "scripts" / "youtube-ads" / "response.js"
 
 # 合并顺序，没列出的 App 按文件名排在最后
 ORDER = [
@@ -46,18 +42,7 @@ def parse(path):
     return meta, sections
 
 
-def build_youtube():
-    YT_OUT.parent.mkdir(exist_ok=True)
-    YT_OUT.write_text(
-        "// 由 tools/build.py 生成，不要手改：scripts/compat/text-codec.js + scripts/vendor/gholts-surge/response.js\n"
-        + YT_COMPAT.read_text(encoding="utf-8") + "\n"
-        + YT_VENDOR.read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
-
-
 def main():
-    build_youtube()
     files = sorted(SRC.glob("*.sgmodule"),
                    key=lambda p: (ORDER.index(p.stem) if p.stem in ORDER else len(ORDER), p.stem))
     apps = [(p.stem, *parse(p)) for p in files]

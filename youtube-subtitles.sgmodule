@@ -1,5 +1,5 @@
 #!name=YouTube 双语字幕
-#!desc=YouTube 字幕加上 DeepL 翻译，多个 key 自动切换。iPhone、iPad、Apple TV 上的 Surge 都可以装
+#!desc=YouTube 字幕加上 DeepL 翻译，多个 key 自动切换
 #!category=Enhancement
 #!arguments=DeepL密钥:"填你的DeepL密钥，多个用竖线分隔",目标语言:ZH-HANS,原文位置:top,备用翻译:google,最长等待:8,调试日志:false
 #!arguments-desc=DeepL密钥\n一个或多个 DeepL API key，用 | 分隔，按顺序使用。某个 key 失效、额度用完、出错时自动换下一个\n\n目标语言\nZH-HANS 简体中文，ZH-HANT 繁体中文，也可以填 EN-US、JA、KO 等\n\n原文位置\n- top：原文在上，译文在下\n- bottom：译文在上，原文在下\n- only：只显示译文\n\n备用翻译\n- google：所有 DeepL key 都不能用时改用 Google 翻译\n- off：不兜底，保持原字幕\n\n最长等待\n最多等几秒。到时间先显示翻好的部分，没翻完的显示原文，重新打开字幕会接着翻。YouTube 报「加载字幕时出错」就调小\n\n调试日志\ntrue：在 Surge 日志里打印每次请求和 key 的切换情况

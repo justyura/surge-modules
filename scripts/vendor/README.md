@@ -26,7 +26,6 @@ python3 tools/build_web.py && node tools/test_web.js   # Popup Blocker 更新后
 
 git clone --depth 1 https://github.com/gholts/surge /tmp/gholts
 cp /tmp/gholts/scripts/youtube/{request.js,response.js} scripts/vendor/gholts-surge/
-python3 tools/build.py && node tools/test_youtube_tv.js   # 重新生成带补丁的 response.js 并测试
 
 git diff scripts/vendor   # 看清楚改了什么再提交，顺手更新上面表格里的提交号
 ```
@@ -35,4 +34,4 @@ git diff scripts/vendor   # 看清楚改了什么再提交，顺手更新上面�
 
 - `bilibili.protobuf.response.js` 的 `sponsorBlock` 打开时，会把哔哩哔哩要下载的播放器插件包换成 kokoryh/chronos 仓库里的版本。`ads/bilibili.sgmodule` 里固定传的是 `false`，别改。
 - Popup Blocker 不是直接加载的，由 `tools/build_web.py` 打包进 `scripts/web/inject.js`。原本依赖的用户脚本管理器接口换成了 localStorage 版本，字体资源不加载。
-- gholts 的 `response.js` 用了 TextEncoder/TextDecoder，Apple TV 上没有。`tools/build.py` 会把本仓库的 `scripts/compat/text-codec.js` 补丁加在前面，生成 `scripts/youtube-ads/response.js`，模块用的是这个。
+

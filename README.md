@@ -8,7 +8,6 @@
 | --- | --- | --- |
 | 代理流量面板 | 在面板里显示剩余流量、已用比例、到期日期和重置时间 | `https://raw.githubusercontent.com/justyura/surge-modules/main/usage-pane.sgmodule` |
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
-| YouTube 去广告（Apple TV） | 电视专用，避开证书锁定的域名 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-tv.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
 | YouTube 双语字幕 | YouTube 字幕加 DeepL 翻译，多个 key 自动切换 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
@@ -77,7 +76,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 | App | 去掉什么 |
 | --- | --- |
 | 哔哩哔哩 | 开屏、首页推荐、动态、视频页、评论区、直播、搜索 |
-| YouTube | 首页、搜索、播放页、Shorts 里的广告，片头和中途插播广告；YouTube Music、Apple TV 也管 |
+| YouTube | 首页、搜索、播放页、Shorts 里的广告，片头和中途插播广告；YouTube Music 也管 |
 | 抖音 | 只能拦广告投放和素材域名，信息流广告去不掉 |
 | 小红书 | 开屏、首页和关注页信息流、搜索页、详情页 |
 | Twitter / X | 只能拦广告和统计域名，时间线里的推广帖目前没有可用规则 |
@@ -104,39 +103,9 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 
 某个 App 用着有问题，想单独关掉它：先卸载合集，再从 `ads/` 里挑需要的单个模块装，每个文件都能单独用。
 
-### Apple TV 上用
+### Apple TV
 
-电视上只装这个电视专用版，不要装合集，也不要装 `ads/youtube.sgmodule`：
-
-```
-https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-tv.sgmodule
-```
-
-电视版 YouTube 对 `www.youtube.com` 和 `*.googlevideo.com` 做了证书锁定（Surge 日志：`Client closed connection just after TLS handshake, it might because of certificate pinning`），解密它们 YouTube 就打不开、视频放不了。电视专用版只解密 `youtubei.googleapis.com`：能去首页、搜索、播放页接口里的广告和中途插播请求；播放数据走的 googlevideo 碰不了，如果广告是跟着视频流一起下发的就去不掉。「YouTube 双语字幕」也要解密 `www.youtube.com`，电视上先别装。
-
-1. 装证书（见下面「Apple TV 装证书」）。
-2. 装上面的模块。
-3. 彻底退出 YouTube 再打开，看几个视频。
-
-#### Apple TV 装证书
-
-Apple TV 不能在 Surge 里一键装证书，要通过一个网址装描述文件：
-
-1. **在 iPhone 上准备证书**：电视用的 Surge 配置最好和手机是同一份（iCloud 同步），这样证书也是同一个。手机 Surge → MITM → 生成证书（已经有就跳过），然后导出证书，得到一个 `.cer` / `.crt` 文件。
-2. **放到一个电视能打开的网址上**：比如自己的服务器、网盘直链。只放证书本身（`.cer` / `.crt`），**不要**放 `.p12` 和密码，那是私钥。
-3. **电视上添加描述文件**：设置 → 通用 → 隐私与安全性，把光标移到「共享 Apple TV 分析数据」上，按遥控器的**播放/暂停键**，会弹出「添加描述文件」，输入第 2 步的网址，安装。
-4. **信任证书**：设置 → 通用 → 关于本机 → 证书信任设置，打开刚装的 Surge 证书。
-5. 电视上的 Surge 打开 MITM。
-
-另一种办法：Mac 上的 Surge 开网关模式和 MITM，让 Apple TV 的网络走 Mac，电视上就不用装证书了。
-
-能去的：首页和搜索里的广告、片头广告、播放中途插播的广告、广告统计请求。
-
-- Apple TV 上的 Surge 只有 JavaScriptCore，没有 `TextEncoder` / `TextDecoder`。脚本前面加了本仓库自己写的补丁（`scripts/compat/text-codec.js`），和系统自带的实现对照测过 7 万组随机数据，结果一致。
-- YouTube 现在会把播放数据加密（Onesie），这部分 MITM 改不了。脚本在本地识别出来就回空响应，App 会退回普通接口，广告就能删掉了。
-- 模块会拦掉 YouTube 的 QUIC（UDP）连接，让它走能解密的 TCP。
-- 测试：`node tools/test_youtube_tv.js`，模拟 Apple TV 的脚本环境跑一遍。
-- Apple TV 版 YouTube 的接口我没法实测。YouTube 经常改服务端，有人反馈 MITM 去广告会间歇失效。还有广告的话告诉我是哪种（片头、中途、首页），我再对着改。
+用不了。电视版 YouTube 对 `www.youtube.com` 和 `*.googlevideo.com` 做了证书锁定，一解密就打不开，换 Mac 网关也一样。电视上想去广告：iPhone 上播放再 AirPlay 到电视，或者 YouTube Premium。
 
 ### 怎么维护
 
@@ -297,13 +266,6 @@ YouTube 字幕下面加一行 DeepL 翻译。脚本是自己写的：`scripts/yo
 | 备用翻译 | google | off 表示不用 Google 兜底 |
 | 最长等待 | 8 | 最多等几秒，到时间先显示翻好的部分 |
 | 调试日志 | false | true 打印详细日志 |
-
-### Apple TV
-
-脚本改的是 YouTube 下发的字幕文件，不改播放器，理论上 iPhone、iPad、Apple TV 的 YouTube App 都适用。但 Apple TV 我没法实测，需要你确认两件事：
-
-1. Apple TV 上的 Surge 要能 MITM：Surge 的 CA 证书要装到 Apple TV 上并信任，MITM 开关打开。
-2. Apple TV 版 YouTube 的字幕也是走 `/api/timedtext`：把「调试日志」改成 `true`，放一个开了英文字幕的视频，看 Surge 的请求记录或日志里有没有 `timedtext`。有就能用；没有的话把请求记录里和字幕相关的地址发我，我再适配。
 
 ### 其他
 

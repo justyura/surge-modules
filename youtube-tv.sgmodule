@@ -1,22 +1,4 @@
-#!name=YouTube去广告（Apple TV）
-#!desc=Apple TV 专用：只解密 youtubei.googleapis.com。电视版 YouTube 对 www.youtube.com 和 googlevideo.com 做了证书锁定，解密会打不开
-#!category=AdBlock
+#!name=【已停用】YouTube去广告（Apple TV），请删除
+#!desc=电视版 YouTube 对 www.youtube.com 和 googlevideo.com 做了证书锁定，MITM 去广告在 Apple TV 上用不了。请在 Surge 里删掉这个模块
 
-# 脚本来自 gholts/surge（在 Maasea/sgmodule 基础上改的，Apache-2.0），存了一份在本仓库 scripts/vendor/gholts-surge
-# 不会把请求转给任何第三方服务器。
-# 电视版 YouTube 对 www.youtube.com 和 *.googlevideo.com 做了证书锁定（Surge 日志：Client closed connection just after TLS handshake），
-# 这里都不解密，所以去掉了拦广告统计的两条和处理播放数据（initplayback）的两条，只保留 youtubei.googleapis.com 上的处理
-# Apple TV 上的 Surge 没有 TextEncoder/TextDecoder，scripts/youtube-ads/response.js 前面补上了（tools/build.py 生成）
-
-[Rule]
-# 不让 YouTube 走 QUIC（UDP），否则 Surge 解不了密，广告去不掉
-AND,((PROTOCOL,QUIC),(DOMAIN,youtubei.googleapis.com)),REJECT
-
-[Script]
-# 播放中途来要插播广告：回空
-YouTube插播广告 = type=http-request,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/player\/ad_break(?:\?.*)?$,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
-# 首页、搜索、播放页等接口：删广告
-YouTube = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/(?:navigation\/resolve_url|browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch|log_event|config)(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":false,"blockGames":false,"blockVerticalLive":false,"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/youtube-ads/response.js
-
-[MITM]
-hostname = %APPEND% youtubei.googleapis.com
+# 旧链接保留成空模块，免得已经装过的 Surge 更新时报 404

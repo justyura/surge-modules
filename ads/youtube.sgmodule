@@ -1,11 +1,10 @@
 #!name=YouTube去广告
-#!desc=首页、搜索、播放页、Shorts 里的广告，片头和中途插播广告，适用于 YouTube、YouTube Music，以及 Apple TV 上的 YouTube
+#!desc=首页、搜索、播放页、Shorts 里的广告，片头和中途插播广告，适用于 YouTube 和 YouTube Music
 #!category=AdBlock
 
 # 脚本来自 gholts/surge（在 Maasea/sgmodule 基础上改的，Apache-2.0），存了一份在本仓库 scripts/vendor/gholts-surge
 # 它会处理加密的播放数据（Onesie / UMP）：本地识别出来就回空响应，让 App 退回能改的普通接口，再把广告删掉。
 # 不会把请求转给任何第三方服务器。
-# Apple TV 上的 Surge 没有 TextEncoder/TextDecoder，scripts/youtube-ads/response.js 前面补上了（tools/build.py 生成）
 
 [Rule]
 # 不让 YouTube 走 QUIC（UDP），否则 Surge 解不了密，广告去不掉
@@ -21,10 +20,10 @@ AND,((PROTOCOL,QUIC),(DOMAIN,youtubei.googleapis.com)),REJECT
 # 播放中途来要插播广告：回空
 YouTube插播广告 = type=http-request,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/player\/ad_break(?:\?.*)?$,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
 # 首页、搜索、播放页等接口：删广告
-YouTube = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/(?:navigation\/resolve_url|browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch|log_event|config)(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":false,"blockGames":false,"blockVerticalLive":false,"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/youtube-ads/response.js
+YouTube = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/(?:navigation\/resolve_url|browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch|log_event|config)(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":false,"blockGames":false,"blockVerticalLive":false,"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/response.js
 # 播放数据（Onesie / UMP）
 YouTube播放请求 = type=http-request,pattern=^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
-YouTube播放数据 = type=http-response,pattern=^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":false,"blockGames":false,"blockVerticalLive":false,"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/youtube-ads/response.js
+YouTube播放数据 = type=http-response,pattern=^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":false,"blockGames":false,"blockVerticalLive":false,"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/response.js
 YouTube日志 = type=http-request,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/log_event,requires-body=1,max-size=-1,binary-body-mode=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
 
 [MITM]
