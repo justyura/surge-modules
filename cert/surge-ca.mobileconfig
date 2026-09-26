@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>PayloadCertificateFileName</key>
+			<string>Surge Generated CA C79A0C76.cer</string>
+			<key>PayloadContent</key>
+			<data>
+			MIIDdjCCAl6gAwIBAgIRAOPwhYZeHW5xQbEXMt02wE8wDQYJKoZI
+			hvcNAQELBQAwTDEkMCIGA1UECgwbU3VyZ2UgR2VuZXJhdGVkIENB
+			IEM3OUEwQzc2MSQwIgYDVQQDDBtTdXJnZSBHZW5lcmF0ZWQgQ0Eg
+			Qzc5QTBDNzYwHhcNMjYwOTI1MDIxMzExWhcNMzYwOTIyMDIxMzEx
+			WjBMMSQwIgYDVQQKDBtTdXJnZSBHZW5lcmF0ZWQgQ0EgQzc5QTBD
+			NzYxJDAiBgNVBAMMG1N1cmdlIEdlbmVyYXRlZCBDQSBDNzlBMEM3
+			NjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMsNP6Ol
+			1zaJZh6WlOv4lNU8OCqTEA924YibH84c/eLYZWx0K60VFIGsinfz
+			aDGjzmO2qST6MxQl1m6/hMxAs0gcbOjc0Me1HsYiGVUkyeJyDzPz
+			VWLBNwfn0t4ecLiugBo6+vY+uAkXxJZqMnCrxnFy4FgkoiCt9fOY
+			epwluwcxkn6wBeZt5hg0M8lEJ3HdSQh2ipfpVFp6+Wjf79jxry5G
+			XgS7d/2fznyd1obtJHlrfVzypUOQtLc2vsstXyRxpsCd5YLJc09i
+			kfCdG86deX3N+USYJuYYex465pvathfQoEy9zWnIqT1TOp7qtvsl
+			RAXZ8gHLDNj5zcyKzcrqcWMCAwEAAaNTMFEwDwYDVR0TAQH/BAUw
+			AwEB/zAdBgNVHQ4EFgQUHo6b9gA5plju8V7X0EJxNO5eNOAwHwYD
+			VR0jBBgwFoAUHo6b9gA5plju8V7X0EJxNO5eNOAwDQYJKoZIhvcN
+			AQELBQADggEBAJjIq26KODzG7O0NyCJHOljaGxzb6iHT4unJJoBz
+			zRHjN95oXsxFHg+NP5Uy/375ov2IehkVBWIb2mtaR/VLn8fuKlq0
+			RhdtWzxihiC+23KX/rI3+fC8Avg5yWa9o/Bf0AaEQJ4CNsORqGdZ
+			awZgBHMIHl1MfimgzgSRKJjUYTuXjLq9dY4ZLS0SK06qcX96PKjl
+			eVjtMsMIJk2imoeEYGBboVt4+m5GEOt2X/ZDDaJ8alR7ibPPPwUc
+			m1SV2nfabBfYd8NushsvzKgWP8UhGhjB5BogC0pFkpuwiiZSSz+u
+			FmELSNDw020zg1pwgBg8bLcDa2XVgOBelC3TgW1hfiQ=
+			</data>
+			<key>PayloadDescription</key>
+			<string>安装 Surge 的 MITM 根证书</string>
+			<key>PayloadDisplayName</key>
+			<string>Surge Generated CA C79A0C76</string>
+			<key>PayloadIdentifier</key>
+			<string>com.wtyura.surge-ca.C79A0C76.cert</string>
+			<key>PayloadType</key>
+			<string>com.apple.security.root</string>
+			<key>PayloadUUID</key>
+			<string>D04FAAAD-422C-56B6-9203-5EE4A25D596C</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>PayloadDescription</key>
+	<string>Surge 的 MITM 根证书，装好后到 设置 → 通用 → 关于本机 → 证书信任设置 里打开信任</string>
+	<key>PayloadDisplayName</key>
+	<string>Surge 证书 C79A0C76</string>
+	<key>PayloadIdentifier</key>
+	<string>com.wtyura.surge-ca.C79A0C76</string>
+	<key>PayloadRemovalDisallowed</key>
+	<false/>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadUUID</key>
+	<string>D30E9A72-5EB1-5EE2-94EE-465F69FD5793</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+</dict>
+</plist>
