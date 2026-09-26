@@ -8,9 +8,10 @@
 | --- | --- | --- |
 | 代理流量面板 | 在面板里显示剩余流量、已用比例、到期日期和重置时间 | `https://raw.githubusercontent.com/justyura/surge-modules/main/usage-pane.sgmodule` |
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
+| YouTube 去广告（Apple TV） | 电视专用，避开证书锁定的域名 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-tv.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
-| YouTube 双语字幕 | YouTube 字幕加 DeepL 翻译，多个 key 自动切换，Apple TV 也能装 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
+| YouTube 双语字幕 | YouTube 字幕加 DeepL 翻译，多个 key 自动切换 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
 
 ## 代理流量面板
 
@@ -105,11 +106,13 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 
 ### Apple TV 上用
 
-电视上只装 YouTube 这一个就行，不用装整个合集：
+电视上只装这个电视专用版，不要装合集，也不要装 `ads/youtube.sgmodule`：
 
 ```
-https://raw.githubusercontent.com/justyura/surge-modules/main/ads/youtube.sgmodule
+https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-tv.sgmodule
 ```
+
+电视版 YouTube 对 `www.youtube.com` 做了证书锁定（Surge 日志：`Client closed connection just after TLS handshake, it might because of certificate pinning`），解密它 YouTube 就打不开。电视专用版只解密 `youtubei.googleapis.com` 和 `*.googlevideo.com`，所以少了拦广告统计的两条。「YouTube 双语字幕」也要解密 `www.youtube.com`，电视上先别装。
 
 1. 装证书（见下面「Apple TV 装证书」）。
 2. 装上面的模块。
