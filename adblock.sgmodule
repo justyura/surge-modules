@@ -14,6 +14,11 @@ DOMAIN,app.biliapi.com,REJECT,pre-matching,extended-matching
 DOMAIN,api.biliapi.net,REJECT,pre-matching,extended-matching
 DOMAIN,app.biliapi.net,REJECT,pre-matching,extended-matching
 
+# ---- YouTube ----
+# 不让 YouTube 走 QUIC（UDP），否则 Surge 解不了密，广告去不掉
+AND,((PROTOCOL,QUIC),(DOMAIN-SUFFIX,googlevideo.com)),REJECT
+AND,((PROTOCOL,QUIC),(DOMAIN,youtubei.googleapis.com)),REJECT
+
 # ---- 抖音 ----
 DOMAIN-KEYWORD,bds.snssdk.com,REJECT
 DOMAIN-KEYWORD,p3.pstatp.com,REJECT
@@ -261,12 +266,6 @@ http-response ^https?:\/\/mobile\.yangkeduo\.com\/proxy\/api\/api\/express\/post
 ^https:\/\/grpc\.biliapi\.net\/bilibili\.app\.interface\.v1\.Search\/DefaultWords$ header="content-type: application/grpc|grpc-status: 0" data-type=base64 data="AAAAACEaHeaQnOe0ouinhumikeOAgeeVquWJp+aIlnVw5Li7KAE="
 ^https:\/\/grpc\.biliapi\.net\/bilibili\.app\.(?:view\.v1\.View\/TFInfo|viewunite\.v1\.View\/(?:PlayPause|ViewEndPage))$ header="content-type: application/grpc|grpc-status: 0" data-type=base64 data="AAAAAAA="
 
-# ---- YouTube ----
-# 中途插播广告：播放到一半时 App 会来要广告，回一个空的 protobuf 消息，等于没有广告
-^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/player\/ad_break data-type=text data="" status-code=200 header="Content-Type:application/x-protobuf"
-# 片头广告
-^https:\/\/rr[\w-]+\.googlevideo\.com\/initplayback\? data-type=text data="{}" status-code=200 header="Content-Type:application/json"
-
 # ---- 小红书 ----
 # 惊喜弹窗
 ^https:\/\/edith\.xiaohongshu\.com\/api\/sns\/v1\/surprisebox\/(?:get_style|open|submit_action) data-type=text data="{}" status-code=200 header="Content-Type:application/json"
@@ -375,7 +374,14 @@ bilibili.webpage = type=http-response,pattern=^https:\/\/www\.bilibili\.com\/bla
 bilibili.protobuf = type=http-response,pattern=^https:\/\/(?:grpc\.biliapi\.net|app\.bilibili\.com)\/bilibili\.(?:app\.(?:show\.v1\.Popular\/Index|dynamic\.v2\.Dynamic\/DynAll|view(?:unite)?\.v1\.View\/(?:View|ViewProgress|RelatesFeed|AIRelateAsync)|playurl\.v1\.PlayURL\/PlayView|playerunite\.v1\.Player\/PlayViewUnite)|polymer\.app\.search\.v1\.Search\/SearchAll|community\.service\.dm\.v1\.DM\/DmView|main\.community\.reply\.v1\.Reply\/MainList|pgc\.gateway\.player\.v2\.PlayURL\/PlayView)$,argument="{"displayUpList":"{{{动态最常访问}}}","purifyComment":{{{过滤置顶评论广告}}},"sponsorBlock":false,"logLevel":"{{{日志等级}}}"}",requires-body=1,binary-body-mode=1,max-size=-1,engine=webview,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/kokoryh-Sparkle/bilibili.protobuf.response.js
 
 # ---- YouTube ----
-YouTube = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/(?:browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch)(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"captionLang":"off","blockUpload":false,"blockImmersive":false,"blockShorts":false,"debug":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/Maasea-sgmodule/youtube.response.js
+# 播放中途来要插播广告：回空
+YouTube插播广告 = type=http-request,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/player\/ad_break(?:\?.*)?$,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
+# 首页、搜索、播放页等接口：删广告
+YouTube = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/(?:navigation\/resolve_url|browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch|log_event|config)(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":false,"blockGames":false,"blockVerticalLive":false,"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/youtube-ads/response.js
+# 播放数据（Onesie / UMP）
+YouTube播放请求 = type=http-request,pattern=^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
+YouTube播放数据 = type=http-response,pattern=^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":false,"blockGames":false,"blockVerticalLive":false,"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/youtube-ads/response.js
+YouTube日志 = type=http-request,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/log_event,requires-body=1,max-size=-1,binary-body-mode=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
 
 # ---- 小红书 ----
 小红书开屏 = type=http-response,pattern=^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d+\/system_service\/(?:config\?|splash_config),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/xiaohongshu.js
@@ -412,4 +418,4 @@ YouTube = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/youtu
 京东 = type=http-response,pattern=^https:\/\/api\.m\.jd\.com\/client\.action\?functionId=(?:deliverLayer|getTabHomeInfo|myOrderInfo|orderTrackBusiness|personinfoBusiness|start|welcomeHome),requires-body=1,timeout=60,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/fmz200-wool_scripts/jingdong.js
 
 [MITM]
-hostname = %APPEND% grpc.biliapi.net, app.bilibili.com, api.bilibili.com, api.live.bilibili.com, www.bilibili.com, line3-h5-mobile-api.biligame.com, rr*.googlevideo.com, youtubei.googleapis.com, www.youtube.com, s.youtube.com, edith.xiaohongshu.com, www.xiaohongshu.com, rec.xiaohongshu.com, so.xiaohongshu.com, api.weibo.cn, api.weibo.com, mapi.weibo.cn, mapi.weibo.com, weibointl.api.weibo.cn, weibointl.api.weibo.com, bootrealtime.uve.weibo.com, card.weibo.com, weibo.com, api.zhihu.com, www.zhihu.com, appcloud2.zhihu.com, m-cloud.zhihu.com, zhuanlan.zhihu.com, page-info.zhihu.com, zhstatic.zhihu.com, mp.weixin.qq.com, acs.m.taobao.com, guide-acs.m.taobao.com, poplayer.template.alibaba.com, acs.m.goofish.com, g-acs.m.goofish.com, api.m.jd.com, api.pinduoduo.com, api.yangkeduo.com, mobile.yangkeduo.com, wmapi.meituan.com, img.meituan.net, s3plus.meituan.net, flowplus.meituan.net, elemecdn.com, fuss10.elemecdn.com, cube.elemecdn.com, nr-op.elemecdn.com, www1.elecfans.com, m5.amap.com, amap-aos-info-nogw.amap.com
+hostname = %APPEND% grpc.biliapi.net, app.bilibili.com, api.bilibili.com, api.live.bilibili.com, www.bilibili.com, line3-h5-mobile-api.biligame.com, *.googlevideo.com, youtubei.googleapis.com, www.youtube.com, s.youtube.com, edith.xiaohongshu.com, www.xiaohongshu.com, rec.xiaohongshu.com, so.xiaohongshu.com, api.weibo.cn, api.weibo.com, mapi.weibo.cn, mapi.weibo.com, weibointl.api.weibo.cn, weibointl.api.weibo.com, bootrealtime.uve.weibo.com, card.weibo.com, weibo.com, api.zhihu.com, www.zhihu.com, appcloud2.zhihu.com, m-cloud.zhihu.com, zhuanlan.zhihu.com, page-info.zhihu.com, zhstatic.zhihu.com, mp.weixin.qq.com, acs.m.taobao.com, guide-acs.m.taobao.com, poplayer.template.alibaba.com, acs.m.goofish.com, g-acs.m.goofish.com, api.m.jd.com, api.pinduoduo.com, api.yangkeduo.com, mobile.yangkeduo.com, wmapi.meituan.com, img.meituan.net, s3plus.meituan.net, flowplus.meituan.net, elemecdn.com, fuss10.elemecdn.com, cube.elemecdn.com, nr-op.elemecdn.com, www1.elecfans.com, m5.amap.com, amap-aos-info-nogw.amap.com

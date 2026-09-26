@@ -129,7 +129,10 @@ Apple TV 不能在 Surge 里一键装证书，要通过一个网址装描述文�
 
 能去的：首页和搜索里的广告、片头广告、播放中途插播的广告、广告统计请求。
 
-- Apple TV 上的 Surge 只有 JavaScriptCore，没有 `TextEncoder` / `TextDecoder`。去广告脚本自带补丁，已经在没有这两个的环境里跑过，能正常执行。
+- Apple TV 上的 Surge 只有 JavaScriptCore，没有 `TextEncoder` / `TextDecoder`。脚本前面加了本仓库自己写的补丁（`scripts/compat/text-codec.js`），和系统自带的实现对照测过 7 万组随机数据，结果一致。
+- YouTube 现在会把播放数据加密（Onesie），这部分 MITM 改不了。脚本在本地识别出来就回空响应，App 会退回普通接口，广告就能删掉了。
+- 模块会拦掉 YouTube 的 QUIC（UDP）连接，让它走能解密的 TCP。
+- 测试：`node tools/test_youtube_tv.js`，模拟 Apple TV 的脚本环境跑一遍。
 - Apple TV 版 YouTube 的接口我没法实测。YouTube 经常改服务端，有人反馈 MITM 去广告会间歇失效。还有广告的话告诉我是哪种（片头、中途、首页），我再对着改。
 
 ### 怎么维护
@@ -145,8 +148,8 @@ Apple TV 不能在 Surge 里一键装证书，要通过一个网址装描述文�
 ### 来源
 
 - [kokoryh/Sparkle](https://github.com/kokoryh/Sparkle)（GPL-3.0）：哔哩哔哩
-- [Maasea/sgmodule](https://github.com/Maasea/sgmodule)（Apache-2.0）：YouTube。只用了处理响应的脚本；它的 request 脚本会把播放请求转到作者的 Cloudflare Worker，没用
-- [fmz200/wool_scripts](https://github.com/fmz200/wool_scripts)（GPL-3.0）：其他所有 App，以及 YouTube 片头广告
+- [gholts/surge](https://github.com/gholts/surge)（Apache-2.0，基于 Maasea/sgmodule）：YouTube。会在本地处理加密的播放数据，不经过第三方服务器
+- [fmz200/wool_scripts](https://github.com/fmz200/wool_scripts)（GPL-3.0）：其他所有 App
 
 规则基本照搬上游，去掉了跟去广告无关的部分：去水印、解除下载限制、换皮肤、解锁会员图标、外链跳转、P2P 屏蔽、空降助手。
 

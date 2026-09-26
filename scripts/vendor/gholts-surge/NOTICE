@@ -1,0 +1,10 @@
+来源：https://github.com/gholts/surge scripts/youtube/request.js、scripts/youtube/response.js
+复制自提交 4bccf6e63dbb200049e0e2e71d3d98c04e7d8073（2026-09-21），内容没有改过。
+
+上游仓库没有 LICENSE 文件，作者在 modules/youtube-enhance.sgmodule 里声明：
+"Maasea-derived code: Apache-2.0."
+所以这里附上 Apache-2.0 许可证原文（和 Maasea/sgmodule 的一致）。
+response.js 里打包的第三方组件（fflate 等）是 MIT 许可证，许可文本在文件开头。
+
+本仓库的改动：tools/build.py 在 response.js 前面加上 scripts/compat/text-codec.js
+（TextEncoder/TextDecoder 补丁），生成 scripts/youtube-ads/response.js，让它能在 Apple TV 的 Surge 上运行。
