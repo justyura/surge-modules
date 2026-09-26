@@ -18,6 +18,8 @@
  *   budget    最多等几秒（默认 8）。到时间就先返回翻好的部分，没翻完的显示原文；
  *             翻好的会缓存，重新打开字幕会接着翻剩下的
  *   debug     true：在 Surge 日志里打印每次请求的细节
+ *   vocab     生词服务地址（vox 的 05_vocabularyService，比如 http://192.168.1.2:8090）。
+ *             英文字幕会整段发过去，生词第一次出现的那句下面标上中文释义。不填就不标
  */
 
 var STORE_KEY = 'yt-subtitles-deepl';
@@ -27,11 +29,13 @@ var TEXTS_PER_REQUEST = 50;      // DeepL 一次最多 50 段
 var BYTES_PER_REQUEST = 100000;  // DeepL 单次请求上限 128 KiB，留点余量
 var PARALLEL = 3;                // 同时发几个请求
 var CACHE_VIDEOS = 3;            // 缓存最近几个视频的翻译，拖进度条、重开字幕不重复花额度
+var NOTES_PER_CUE = 2;           // 每句字幕最多标几个生词
+var NOTE_CHARS = 10;             // 释义最多几个字
 
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
 
 function parseArgs(raw) {
-  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false' };
+  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false', vocab: '' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -43,6 +47,7 @@ function parseArgs(raw) {
   args.target = args.target.toUpperCase();
   args.budget = Math.min(50, Math.max(3, Number(args.budget) || 8));
   args.debug = args.debug === 'true';
+  args.vocab = /^https?:\/\/[^\s"]+$/i.test(args.vocab) ? args.vocab.replace(/\/+$/, '') : '';
   return args;
 }
 
@@ -292,11 +297,59 @@ async function translateAll(texts, source, state, cached) {
 
 // ---------- 字幕格式 ----------
 
-function combine(original, translation) {
-  if (!translation || translation === original) return original;
-  if (ARGS.position === 'only') return translation;
-  if (ARGS.position === 'bottom') return translation + '\n' + original;
-  return original + '\n' + translation;
+function combine(original, translation, note) {
+  var text = original;
+  if (translation && translation !== original) {
+    if (ARGS.position === 'only') text = translation;
+    else if (ARGS.position === 'bottom') text = translation + '\n' + original;
+    else text = original + '\n' + translation;
+  }
+  return note ? text + '\n' + note : text;
+}
+
+// ---------- 生词：调用自己的 vocabularyService ----------
+
+// 整段字幕发过去，返回 [{ word, count, rank, translation }]，已经去掉了基础词和常用词
+function fetchWords(texts) {
+  var wait = Math.max(1, Math.min(4, Math.floor(remaining())));
+  return request('post', {
+    url: ARGS.vocab + '/v1/extract',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: texts.join('\n') }),
+    timeout: wait,
+  }).then(function (r) {
+    if (r.error || r.status !== 200) { log('生词服务出错：' + (r.error || r.status)); return null; }
+    try { return JSON.parse(r.body).words || []; } catch (e) { log('生词服务返回的不是 JSON'); return null; }
+  });
+}
+
+// ECDICT 的释义像「a. 普遍存在的, 无所不在的」「n. [医] 痉挛」，只留第一个意思
+function shortMeaning(translation) {
+  var text = String(translation || '').split(/\\n|\n/)[0]
+    .replace(/^(?:[a-z]+\.\s*)+/i, '')
+    .replace(/\[[^\]]*\]|（[^）]*）|\([^)]*\)/g, '')
+    .split(/[,，;；、]/)[0]
+    .trim();
+  return text.length > NOTE_CHARS ? text.slice(0, NOTE_CHARS) + '…' : text;
+}
+
+// 每个生词只在第一次出现的那句下面标一次，返回 { 字幕序号: '词 释义 · 词 释义' }
+function placeNotes(texts, words) {
+  var notes = {};
+  var counts = {};
+  (words || []).forEach(function (w) {
+    var meaning = shortMeaning(w.translation);
+    if (!w.word || !meaning) return;
+    var re = new RegExp("(^|[^A-Za-z'’])" + w.word.replace(/'/g, "['’]") + "(?![A-Za-z'’])", 'i');
+    for (var i = 0; i < texts.length; i++) {
+      if (!texts[i] || !re.test(texts[i])) continue;
+      if ((counts[i] || 0) >= NOTES_PER_CUE) continue;
+      counts[i] = (counts[i] || 0) + 1;
+      notes[i] = (notes[i] ? notes[i] + ' · ' : '') + w.word + ' ' + meaning;
+      break;
+    }
+  });
+  return notes;
 }
 
 function decodeXml(s) {
@@ -320,10 +373,10 @@ var FORMATS = {
         return e.segs ? e.segs.map(function (s) { return s.utf8 || ''; }).join('').trim() : '';
       });
     },
-    apply: function (doc, texts, map) {
+    apply: function (doc, texts, map, notes) {
       doc.events.forEach(function (e, i) {
         if (!texts[i]) return;
-        e.segs = [{ utf8: combine(texts[i], map[texts[i]]) }];
+        e.segs = [{ utf8: combine(texts[i], map[texts[i]], notes[i]) }];
         delete e.wWinId; // 自动字幕的滚动窗口，去掉后按普通字幕显示
       });
       return doc;
@@ -342,12 +395,13 @@ var FORMATS = {
       });
       return out;
     },
-    apply: function (body, texts, map) {
+    apply: function (body, texts, map, notes) {
       var i = 0;
       return body.replace(this.RE, function (m, open, tag, inner, close) {
+        var note = notes[i];
         var text = texts[i++];
-        if (!text || !map[text]) return m;
-        return open + encodeXml(combine(text, map[text])) + close;
+        if (!text || (!map[text] && !note)) return m;
+        return open + encodeXml(combine(text, map[text], note)) + close;
       });
     },
     parse: function (body) { return body; },
@@ -363,12 +417,12 @@ var FORMATS = {
         return at === -1 ? '' : lines.slice(at + 1).join('\n').replace(/<[^>]+>/g, '').trim();
       });
     },
-    apply: function (body, texts, map) {
+    apply: function (body, texts, map, notes) {
       return this.blocks(body).map(function (block, i) {
-        if (!texts[i] || !map[texts[i]]) return block;
+        if (!texts[i] || (!map[texts[i]] && !notes[i])) return block;
         var lines = block.split('\n');
         var at = lines.findIndex(function (l) { return l.indexOf('-->') !== -1; });
-        return lines.slice(0, at + 1).concat(combine(texts[i], map[texts[i]])).join('\n');
+        return lines.slice(0, at + 1).concat(combine(texts[i], map[texts[i]], notes[i])).join('\n');
       }).join('\n\n');
     },
     parse: function (body) { return body; },
@@ -400,7 +454,8 @@ function main() {
   if (!body || typeof body !== 'string') return Promise.resolve(null);
   if (param(url, 'tlang')) { log('YouTube 自带翻译字幕，跳过'); return Promise.resolve(null); }
   if (lang && lang.split('-')[0] === ARGS.target.split('-')[0].toLowerCase()) { log('已经是目标语言，跳过'); return Promise.resolve(null); }
-  if (!ARGS.keyList.length && ARGS.fallback !== 'google') { log('没有可用的 DeepL key'); return Promise.resolve(null); }
+  var wantVocab = !!ARGS.vocab && (!lang || lang.split('-')[0] === 'en');
+  if (!ARGS.keyList.length && ARGS.fallback !== 'google' && !wantVocab) { log('没有可用的 DeepL key'); return Promise.resolve(null); }
 
   var format = detect(url, body);
   if (!format) { log('不认识的字幕格式'); return Promise.resolve(null); }
@@ -418,13 +473,22 @@ function main() {
   // DeepL 的源语言写法：en、ja → EN、JA；自动生成字幕的语言也能用
   var source = lang ? lang.split('-')[0].toUpperCase() : '';
 
-  return translateAll(unique, source, state, cached).then(function (map) {
+  var canTranslate = ARGS.keyList.length || ARGS.fallback === 'google';
+  var words = !wantVocab ? Promise.resolve(null)
+    : entry && entry.words ? Promise.resolve(entry.words)
+    : fetchWords(unique);
+
+  return Promise.all([canTranslate ? translateAll(unique, source, state, cached) : Promise.resolve(cached), words]).then(function (results) {
+    var map = results[0];
+    var list = results[1];
     state.cache = state.cache.filter(function (c) { return c.id !== cacheId; });
-    state.cache.unshift({ id: cacheId, map: map });
+    state.cache.unshift(list ? { id: cacheId, map: map, words: list } : { id: cacheId, map: map });
     state.cache = state.cache.slice(0, CACHE_VIDEOS);
     saveState(state);
-    if (!Object.keys(map).length) { log('没有拿到任何翻译，保持原字幕'); return null; }
-    return handler.stringify(handler.apply(doc, texts, map));
+    var notes = placeNotes(texts, list);
+    log('生词 ' + (list ? list.length : '-') + ' 个，标在 ' + Object.keys(notes).length + ' 句下面');
+    if (!Object.keys(map).length && !Object.keys(notes).length) { log('没有拿到任何翻译，保持原字幕'); return null; }
+    return handler.stringify(handler.apply(doc, texts, map, notes));
   });
 }
 

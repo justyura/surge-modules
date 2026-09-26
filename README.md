@@ -10,7 +10,7 @@
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
-| YouTube 双语字幕 | YouTube 字幕加 DeepL 翻译，多个 key 自动切换 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
+| YouTube 双语字幕 | YouTube 字幕加 DeepL 翻译，多个 key 自动切换，可以标生词 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
 
 ## 代理流量面板
 
@@ -265,6 +265,23 @@ YouTube 字幕下面加一行 DeepL 翻译。脚本是自己写的：`scripts/yo
 - 状态里只存 key 的指纹，不存明文。
 - 打开「调试日志」可以在 Surge 日志里看到每次请求和 key 的切换。
 
+### 标生词
+
+接的是自己的 [vox](https://github.com/justyura/vox) 里的 `05_vocabularyService`（ECDICT 词典，`POST /v1/extract`）。在参数「生词服务」里填它的地址，比如 `http://192.168.1.2:8090`。
+
+- 英文字幕会整段发给这个服务，它挑出中高考、四级以外、词频 5000 名以后的词，带中文释义。
+- 每个生词只在第一次出现的那句下面标一次，每句最多 2 个，释义只留第一个意思，像这样：
+
+  ```
+  Its ephemeral nature makes the phenomenon hard to quantify.
+  它的短暂性使得这一现象难以量化。
+  ephemeral 朝生暮死的 · quantify 定量
+  ```
+
+- 不用 DeepL、只想标生词也行：「DeepL密钥」不填，「备用翻译」填 off。
+- 服务最多等 4 秒，连不上就只显示翻译，不影响字幕。同一个视频的生词会缓存。
+- 手机要能连到这个地址：在家用局域网 IP；在外面要么把服务放到公网（建议加 HTTPS），要么在 Surge 里配 WireGuard 连回家。iPhone 同时只能开一个 VPN，Surge 开着时 Tailscale 用不了。
+
 ### 参数
 
 | 参数 | 默认 | 说明 |
@@ -274,12 +291,13 @@ YouTube 字幕下面加一行 DeepL 翻译。脚本是自己写的：`scripts/yo
 | 原文位置 | top | top 原文在上；bottom 译文在上；only 只显示译文 |
 | 备用翻译 | google | off 表示不用 Google 兜底 |
 | 最长等待 | 8 | 最多等几秒，到时间先显示翻好的部分 |
+| 生词服务 | 占位文字 | 自己的 vox 生词服务地址，比如 `http://192.168.1.2:8090`；不填就不标生词 |
 | 调试日志 | false | true 打印详细日志 |
 
 ### 其他
 
 - 支持 YouTube 的三种字幕格式：json3、srv3 / srv1 XML、WebVTT。自动生成字幕会把逐词的片段合成整句再翻。
-- 测试：`node tools/test_subtitles.js`，模拟 Surge 和 DeepL / Google 接口，覆盖 key 切换、暂停、兜底、缓存、分批和三种字幕格式。
+- 测试：`node tools/test_subtitles.js`，模拟 Surge 和 DeepL / Google / 生词服务接口，覆盖 key 切换、暂停、兜底、缓存、分批、三种字幕格式和标生词。
 - DeepL 的条款是一人一个免费账号，多个免费账号轮着用超出额度违反条款，账号可能被封，自己把握。
 
 ## 规矩

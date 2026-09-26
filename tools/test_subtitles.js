@@ -19,7 +19,8 @@ function fakeDeepl(text, xml, mode) {
 }
 
 // behavior[key] = 状态码 | 'network' | 'merge'（标签被 DeepL 合并）| 'hang'（永不返回），默认 200
-function run({ url, body, args, behavior = {}, store = {}, google = true, latency = 0 }) {
+// vocab: 生词服务返回的 words 数组，或 'down'（连不上）、'hang'（不返回）
+function run({ url, body, args, behavior = {}, store = {}, google = true, latency = 0, vocab = [] }) {
   const calls = [];
   const started = Date.now();
   return new Promise((resolve) => {
@@ -30,6 +31,12 @@ function run({ url, body, args, behavior = {}, store = {}, google = true, latenc
       $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
       $httpClient: {
         post(req, cb) {
+          if (req.url.endsWith('/v1/extract')) {
+            calls.push({ vendor: 'vocab', url: req.url, text: JSON.parse(req.body).text, timeout: req.timeout });
+            if (vocab === 'hang') return;
+            if (vocab === 'down') return setTimeout(() => cb('connection refused', null, null));
+            return setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ words: vocab })));
+          }
           const key = req.headers.Authorization.replace('DeepL-Auth-Key ', '');
           const b = JSON.parse(req.body);
           const xml = b.tag_handling === 'xml';
@@ -204,6 +211,46 @@ const deeplCalls = (r) => r.calls.filter((c) => c.vendor === 'deepl');
     const r4 = await run({ url: URL_EN, body: json3(['only']), args: ARGS(K1, '&position=only') });
     assert.deepStrictEqual(events(r4.out), ['译:only']);
     console.log('ok  跳过 YouTube 自带翻译、中文字幕、没配置 key；position=only 只显示译文');
+  }
+
+  // 11. 生词：第一次出现的那句下面标释义，每句最多 2 个；服务挂了不影响翻译
+  {
+    const VOCAB = '&vocab=http://192.168.1.2:8090/';
+    const words = [
+      { word: 'ubiquitous', count: 2, rank: 9000, translation: 'a. 普遍存在的, 无所不在的' },
+      { word: 'ephemeral', count: 1, rank: 12000, translation: 'a. 短暂的\\n n. 短命植物' },
+      { word: 'spasm', count: 1, rank: 15000, translation: 'n. [医] 痉挛, 抽搐' },
+      { word: "o'clock", count: 1, rank: 6000, translation: 'adv. 点钟' },
+      { word: 'extraordinarily', count: 1, rank: 8000, translation: 'adv. 非常地；特别地；格外地；奇特地；非同寻常地' },
+    ];
+    const lines = ['Phones are ubiquitous now', 'Ephemeral, ubiquitous and a spasm', 'Ubiquitous again', 'At five o’clock it was extraordinarily hot'];
+    const r = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1, VOCAB), vocab: words });
+    const call = r.calls.find((c) => c.vendor === 'vocab');
+    assert.strictEqual(call.url, 'http://192.168.1.2:8090/v1/extract');
+    assert.strictEqual(call.text, lines.join('\n'));
+    assert.deepStrictEqual(events(r.out), [
+      'Phones are ubiquitous now\n译:Phones are ubiquitous now\nubiquitous 普遍存在的',
+      'Ephemeral, ubiquitous and a spasm\n译:Ephemeral, ubiquitous and a spasm\nephemeral 短暂的 · spasm 痉挛',
+      'Ubiquitous again\n译:Ubiquitous again',
+      'At five o’clock it was extraordinarily hot\n译:At five o’clock it was extraordinarily hot\no\'clock 点钟 · extraordinarily 非常地',
+    ]);
+    // 同一个视频再打开：生词从缓存拿，不再请求
+    const r2 = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1, VOCAB), store: r.store, vocab: 'down' });
+    assert.strictEqual(r2.calls.length, 0);
+    assert.strictEqual(events(r2.out)[0], events(r.out)[0]);
+    // 服务连不上 / 卡住：照常翻译，不标生词，也不超时
+    const r3 = await run({ url: URL_EN.replace('vid1', 'vid3'), body: json3(lines), args: ARGS(K1, VOCAB), vocab: 'down' });
+    assert.strictEqual(events(r3.out)[0], 'Phones are ubiquitous now\n译:Phones are ubiquitous now');
+    const r4 = await run({ url: URL_EN.replace('vid1', 'vid4'), body: json3(lines), args: ARGS(K1, VOCAB + '&budget=3'), vocab: 'hang' });
+    assert.ok(r4.seconds < 7, '卡住的生词服务拖慢了字幕：' + r4.seconds);
+    // 没有 DeepL key、也不用 Google：只标生词
+    const r5 = await run({ url: URL_EN.replace('vid1', 'vid5'), body: json3(lines), args: ARGS('', VOCAB + '&fallback=off'), vocab: words });
+    assert.deepStrictEqual(events(r5.out).slice(0, 3), ['Phones are ubiquitous now\nubiquitous 普遍存在的', 'Ephemeral, ubiquitous and a spasm\nephemeral 短暂的 · spasm 痉挛', 'Ubiquitous again']);
+    // 非英文字幕、没填地址（占位文字）：不请求生词服务
+    const r6 = await run({ url: URL_EN.replace('lang=en', 'lang=ja'), body: json3(['こんにちは']), args: ARGS(K1, VOCAB) });
+    const r7 = await run({ url: URL_EN, body: json3(['Hi']), args: ARGS(K1, '&vocab=不用就留着') });
+    for (const x of [r6, r7]) assert.ok(!x.calls.some((c) => c.vendor === 'vocab'));
+    console.log('ok  生词：只在第一次出现时标，每句最多 2 个，缓存、服务挂了不影响字幕');
   }
 
   console.log('全部通过');
