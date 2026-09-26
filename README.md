@@ -111,9 +111,21 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 https://raw.githubusercontent.com/justyura/surge-modules/main/ads/youtube.sgmodule
 ```
 
-1. Apple TV 的 Surge 里打开 MITM，生成并安装证书，再到 Apple TV 的 设置 → 通用 → 关于本机 → 证书信任设置 里打开信任。
+1. 装证书（见下面「Apple TV 装证书」）。
 2. 装上面的模块。
 3. 彻底退出 YouTube 再打开，看几个视频。
+
+#### Apple TV 装证书
+
+Apple TV 不能在 Surge 里一键装证书，要通过一个网址装描述文件：
+
+1. **在 iPhone 上准备证书**：电视用的 Surge 配置最好和手机是同一份（iCloud 同步），这样证书也是同一个。手机 Surge → MITM → 生成证书（已经有就跳过），然后导出证书，得到一个 `.cer` / `.crt` 文件。
+2. **放到一个电视能打开的网址上**：比如自己的服务器、网盘直链。只放证书本身（`.cer` / `.crt`），**不要**放 `.p12` 和密码，那是私钥。
+3. **电视上添加描述文件**：设置 → 通用 → 隐私与安全性，把光标移到「共享 Apple TV 分析数据」上，按遥控器的**播放/暂停键**，会弹出「添加描述文件」，输入第 2 步的网址，安装。
+4. **信任证书**：设置 → 通用 → 关于本机 → 证书信任设置，打开刚装的 Surge 证书。
+5. 电视上的 Surge 打开 MITM。
+
+另一种办法：Mac 上的 Surge 开网关模式和 MITM，让 Apple TV 的网络走 Mac，电视上就不用装证书了。
 
 能去的：首页和搜索里的广告、片头广告、播放中途插播的广告、广告统计请求。
 
