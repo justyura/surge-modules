@@ -1,0 +1,140 @@
+--- a/response.js
++++ b/response.js
+@@ -268,6 +268,8 @@
+         "youtube_outline_experimental/live_24pt",
+     );
+     const IMMERSIVE_LIVE = textEncoder.encode("immersive_live");
++    // Local patch: Shorts shelves and Shorts cells (shorts_shelf.eml etc.).
++    const SHORTS_LAYOUT = /^(?:shorts|reels?)_[a-z0-9_]*\.eml/;
+     function containsMarker(bytes, marker = AD_TRACKING) {
+         outer: for (let i = 0; i <= bytes.length - marker.length; i++) {
+             for (let j = 0; j < marker.length; j++)
+@@ -309,7 +311,7 @@
+             return false;
+         }
+     }
+-    function isBlockedItem(item, blockGames, blockVerticalLive) {
++    function isBlockedItem(item, blockGames, blockVerticalLive, blockShorts) {
+         let ad = false;
+         visitObjects(item, (object) => {
+             const layout = object.layoutRender?.eml?.split("|")[0];
+@@ -319,6 +321,7 @@
+                 object.shoppingShelf ||
+                 object.sponsoredVideo ||
+                 object.sponsoredDisplay ||
++                (blockShorts && SHORTS_LAYOUT.test(layout ?? "")) ||
+                 (blockVerticalLive &&
+                     object.videoLockup &&
+                     hasVerticalLiveTarget(object.videoLockup))
+@@ -345,7 +348,12 @@
+     }
+     function transformContent(
+         message,
+-        { blockGames = true, blockVerticalLive = false, jumpAhead = true } = {},
++        {
++            blockGames = true,
++            blockVerticalLive = false,
++            blockShorts = false,
++            jumpAhead = true,
++        } = {},
+     ) {
+         let changed = transformMenus(message);
+         const emptied = new WeakSet();
+@@ -353,13 +361,23 @@
+             const layout = object.renderInfo?.layoutRender?.eml?.split("|")[0];
+             if (AD_LAYOUTS.has(layout) || SHOPPING_LAYOUT.test(layout ?? ""))
+                 emptied.add(object);
++            if (
++                blockShorts &&
++                (SHORTS_LAYOUT.test(layout ?? "") || object.reelShelfRenderer)
++            )
++                emptied.add(object.reelShelfRenderer ?? object);
+             if (jumpAhead && object.smartSkipButton)
+                 changed = unlockJumpAhead(object.smartSkipButton) || changed;
+             for (const field of ["richItemContents", "overlays"]) {
+                 if (!Array.isArray(object[field])) continue;
+                 const keep = object[field].filter(
+                     (item) =>
+-                        !isBlockedItem(item, blockGames, blockVerticalLive),
++                        !isBlockedItem(
++                            item,
++                            blockGames,
++                            blockVerticalLive,
++                            blockShorts,
++                        ),
+                 );
+                 changed = keep.length !== object[field].length || changed;
+                 if (object[field].length && !keep.length) emptied.add(object);
+@@ -529,6 +547,7 @@
+             );
+         if (player.playbackTracking)
+             delete player.playbackTracking.pageadViewthroughconversion;
++        if (parameters.autoCaptions) enableCaptions(player);
+         const status = player.playabilityStatus;
+         if (status) {
+             status.pictureInPictureRender ??= {};
+@@ -548,6 +567,41 @@
+         }
+         return true;
+     }
++    // Local patch: turn captions on by default. YouTube sends the same state
++    // itself (initial state 3, "ON_RECOMMENDED") when the video has a track in
++    // the viewer's UI language; do it for the original-language track too.
++    const CAPTIONS_ON = 3;
++    function enableCaptions(player) {
++        const tracklist = player.captions?.tracklist;
++        const tracks = tracklist?.tracks ?? [];
++        if (!tracks.length) return;
++        for (const audio of tracklist.audioTracks) {
++            if (audio.initialState === CAPTIONS_ON) continue;
++            const indices = audio.trackIndices.filter((i) => tracks[i]);
++            if (!indices.length) continue;
++            let index =
++                audio.hasDefaultTrack && indices.includes(audio.defaultTrack)
++                    ? audio.defaultTrack
++                    : undefined;
++            if (index === undefined) {
++                const base = (code) => (code ?? "").split("-")[0];
++                const asr = indices.find((i) => tracks[i].kind === "asr");
++                const spoken = asr === undefined ? "" : base(tracks[asr].languageCode);
++                index =
++                    indices.find(
++                        (i) =>
++                            tracks[i].kind !== "asr" &&
++                            spoken &&
++                            base(tracks[i].languageCode) === spoken,
++                    ) ??
++                    asr ??
++                    indices[0];
++            }
++            audio.defaultTrack = index;
++            audio.hasDefaultTrack = true;
++            audio.initialState = CAPTIONS_ON;
++        }
++    }
+     function removeShortsAds(message) {
+         const keep = message.entries.filter(
+             (entry) => !entry.command?.reelWatchEndpoint?.adClientParams?.isAd,
+@@ -741,6 +795,22 @@
+             [2, "playabilityStatus", "PlayabilityStatus"],
+             [9, "playbackTracking", "PlaybackTracking"],
+             [68, "adSlots", "bytes", true],
++            [10, "captions", "Captions"],
++        ],
++        Captions: [[51621377, "tracklist", "CaptionTracklist"]],
++        CaptionTracklist: [
++            [1, "tracks", "CaptionTrack", true],
++            [2, "audioTracks", "CaptionAudioTrack", true],
++        ],
++        CaptionTrack: [
++            [4, "languageCode", "string"],
++            [5, "kind", "string"],
++        ],
++        CaptionAudioTrack: [
++            [2, "trackIndices", "uint", true],
++            [3, "defaultTrack", "uint"],
++            [6, "hasDefaultTrack", "bool"],
++            [11, "initialState", "uint"],
+         ],
+         PlayerConfig: [
+             [1, "granularVariableSpeedConfig", "PlaybackSpeedConfig"],

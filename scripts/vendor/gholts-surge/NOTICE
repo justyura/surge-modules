@@ -1,5 +1,6 @@
 来源：https://github.com/gholts/surge scripts/youtube/request.js、scripts/youtube/response.js
-复制自提交 4bccf6e63dbb200049e0e2e71d3d98c04e7d8073（2026-09-21），内容没有改过。
+复制自提交 4bccf6e63dbb200049e0e2e71d3d98c04e7d8073（2026-09-21）。
+request.js 没有改过。response.js 有本地改动（隐藏 Shorts 栏、自动开字幕），改了什么见 local.patch。
 
 上游仓库没有 LICENSE 文件，作者在 modules/youtube-enhance.sgmodule 里声明：
 "Maasea-derived code: Apache-2.0."

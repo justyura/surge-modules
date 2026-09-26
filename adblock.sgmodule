@@ -1,8 +1,8 @@
 #!name=App 去广告合集
 #!desc=哔哩哔哩、YouTube、抖音、小红书、Twitter、微博、知乎、微信、淘宝、闲鱼、京东、拼多多、美团和美团外卖、饿了么、高德地图。开屏和 App 内的广告、推广一起去
 #!category=AdBlock
-#!arguments=动态最常访问:auto,创作中心:0,过滤置顶评论广告:1,日志等级:4
-#!arguments-desc=动态最常访问\n- auto: 有人在直播时才显示\n- show: 一直显示\n- hide: 一直隐藏\n\n创作中心\n- 0: 隐藏\n- 1: 显示\n\n过滤置顶评论广告\n- 0: 关\n- 1: 开\n\n日志等级\n- 1: DEBUG\n- 2: INFO\n- 3: WARN\n- 4: ERROR\n- 5: OFF
+#!arguments=动态最常访问:auto,创作中心:0,过滤置顶评论广告:1,日志等级:4,YouTube隐藏Shorts:true,YouTube隐藏游戏:true,YouTube隐藏竖屏直播:true,YouTube自动字幕:true
+#!arguments-desc=动态最常访问\n- auto: 有人在直播时才显示\n- show: 一直显示\n- hide: 一直隐藏\n\n创作中心\n- 0: 隐藏\n- 1: 显示\n\n过滤置顶评论广告\n- 0: 关\n- 1: 开\n\n日志等级\n- 1: DEBUG\n- 2: INFO\n- 3: WARN\n- 4: ERROR\n- 5: OFF\n\nYouTube 的几个开关，只能填 true（开）或 false（关）\n\nYouTube隐藏Shorts：底部的 Shorts 标签、首页和搜索里的 Shorts 栏\n\nYouTube隐藏游戏：首页里的 Playables 小游戏\n\nYouTube隐藏竖屏直播：推荐里的竖屏直播\n\nYouTube自动字幕：打开视频时自动开字幕，优先用视频原语言的字幕；配合「YouTube 双语字幕」模块就是自动双语
 
 # 由 tools/build.py 从 ads/ 生成，不要手改
 # 脚本都在本仓库 scripts/vendor/，来源和许可证见 scripts/vendor/README.md
@@ -377,10 +377,10 @@ bilibili.protobuf = type=http-response,pattern=^https:\/\/(?:grpc\.biliapi\.net|
 # 播放中途来要插播广告：回空
 YouTube插播广告 = type=http-request,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/player\/ad_break(?:\?.*)?$,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
 # 首页、搜索、播放页等接口：删广告
-YouTube = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/(?:navigation\/resolve_url|browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch|log_event|config)(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":false,"blockGames":false,"blockVerticalLive":false,"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/response.js
+YouTube = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/(?:navigation\/resolve_url|browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch|log_event|config)(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":{{{YouTube隐藏Shorts}}},"blockGames":{{{YouTube隐藏游戏}}},"blockVerticalLive":{{{YouTube隐藏竖屏直播}}},"autoCaptions":{{{YouTube自动字幕}}},"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/response.js
 # 播放数据（Onesie / UMP）
 YouTube播放请求 = type=http-request,pattern=^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
-YouTube播放数据 = type=http-response,pattern=^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":false,"blockGames":false,"blockVerticalLive":false,"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/response.js
+YouTube播放数据 = type=http-response,pattern=^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback(?:\?.*)?$,requires-body=1,max-size=-1,binary-body-mode=1,argument="{"blockUpload":false,"blockShorts":{{{YouTube隐藏Shorts}}},"blockGames":{{{YouTube隐藏游戏}}},"blockVerticalLive":{{{YouTube隐藏竖屏直播}}},"autoCaptions":{{{YouTube自动字幕}}},"jumpAhead":false,"autoHd":false}",script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/response.js
 YouTube日志 = type=http-request,pattern=^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/log_event,requires-body=1,max-size=-1,binary-body-mode=1,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/vendor/gholts-surge/request.js
 
 # ---- 小红书 ----

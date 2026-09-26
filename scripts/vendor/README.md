@@ -9,7 +9,9 @@
 | `gholts-surge/` | [gholts/surge](https://github.com/gholts/surge) `scripts/youtube/` 的 `request.js`、`response.js` | Apache-2.0（作者在模块里声明，基于 Maasea/sgmodule）；response.js 里打包的组件是 MIT | `4bccf6e63dbb200049e0e2e71d3d98c04e7d8073`（2026-09-21） |
 | `fmz200-wool_scripts/` | [fmz200/wool_scripts](https://github.com/fmz200/wool_scripts) `Scripts/` | GPL-3.0 | `3ca7487b4e4b86d9af76e50df72c62eacfbb659e`（2026-09-10） |
 
-每个目录里的 `LICENSE` 是上游的许可证原文。脚本内容没有改过。
+每个目录里的 `LICENSE` 是上游的许可证原文。除了 `gholts-surge/response.js`，脚本内容都没有改过。
+
+`gholts-surge/response.js` 加了两处本地改动，全部在 `gholts-surge/local.patch` 里：隐藏首页和搜索里的 Shorts 栏（`blockShorts` 原本只去掉底部标签），以及打开视频自动开字幕（`autoCaptions`）。
 
 ## 更新
 
@@ -26,6 +28,7 @@ python3 tools/build_web.py && node tools/test_web.js   # Popup Blocker 更新后
 
 git clone --depth 1 https://github.com/gholts/surge /tmp/gholts
 cp /tmp/gholts/scripts/youtube/{request.js,response.js} scripts/vendor/gholts-surge/
+patch -p1 -d scripts/vendor/gholts-surge < scripts/vendor/gholts-surge/local.patch   # 打不上就手动改，再重新生成 local.patch
 
 git diff scripts/vendor   # 看清楚改了什么再提交，顺手更新上面表格里的提交号
 ```

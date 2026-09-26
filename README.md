@@ -76,7 +76,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 | App | 去掉什么 |
 | --- | --- |
 | 哔哩哔哩 | 开屏、首页推荐、动态、视频页、评论区、直播、搜索 |
-| YouTube | 首页、搜索、播放页、Shorts 里的广告，片头和中途插播广告；YouTube Music 也管 |
+| YouTube | 首页、搜索、播放页、Shorts 里的广告，片头和中途插播广告；YouTube Music 也管。另外默认隐藏 Shorts、小游戏、竖屏直播，打开视频自动开字幕 |
 | 抖音 | 只能拦广告投放和素材域名，信息流广告去不掉 |
 | 小红书 | 开屏、首页和关注页信息流、搜索页、详情页 |
 | Twitter / X | 只能拦广告和统计域名，时间线里的推广帖目前没有可用规则 |
@@ -100,6 +100,15 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 3. 把 App 从后台划掉再打开。还有广告就清一下 App 缓存，或者删了重装。
 
 哔哩哔哩有几个参数可以调：动态最常访问、创作中心、过滤置顶评论广告、日志等级，在模块参数里改。
+
+YouTube 有四个开关，默认都是 `true`，不想要就改成 `false`：
+
+- `YouTube隐藏Shorts`：底部的 Shorts 标签，首页、搜索、播放页推荐里的 Shorts 栏
+- `YouTube隐藏游戏`：首页里的 Playables 小游戏
+- `YouTube隐藏竖屏直播`：推荐里的竖屏直播
+- `YouTube自动字幕`：打开视频就自动开字幕。视频有原语言的人工字幕就用它，没有就用自动生成的。和「YouTube 双语字幕」一起装，打开视频直接是双语
+
+自动字幕是改的 YouTube 返回的「这个视频默认开不开字幕」，和 YouTube 给日语用户看英文视频时自动开日文字幕是同一个开关。你在某个视频里手动关了字幕，App 会记住，之后可能不再自动开，到播放器里再打开一次就好。
 
 某个 App 用着有问题，想单独关掉它：先卸载合集，再从 `ads/` 里挑需要的单个模块装，每个文件都能单独用。
 
@@ -228,7 +237,7 @@ YouTube 字幕下面加一行 DeepL 翻译。脚本是自己写的：`scripts/yo
 ### 用法
 
 1. 装模块，在参数「DeepL密钥」里填 key，多个用 `|` 分隔，比如 `key1:fx|key2:fx|key3:fx`。
-2. 在 YouTube 里打开原文字幕（比如英文），就会变成双语。
+2. 在 YouTube 里打开原文字幕（比如英文），就会变成双语。装了「App 去广告合集」并开着 `YouTube自动字幕` 的话，字幕会自动打开，不用手点。
 3. YouTube 自带的「自动翻译」字幕和本来就是中文的字幕不会再翻。
 
 ### 多个 key 怎么切换
