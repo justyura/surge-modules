@@ -7,7 +7,7 @@
 # License: https://github.com/hagezi/dns-blocklists/blob/main/LICENSE
 # Issues: https://github.com/hagezi/dns-blocklists/issues
 # Disclaimer: https://github.com/hagezi/dns-blocklists/blob/main/README.md#disclaimer
-# Number of entries: 50705
+# Number of entries: 50716
 #
 .fd01ce9a02.0012e30263.com
 .0db65504c2.012dadaa06.com
@@ -342,6 +342,9 @@
 .darian.bantengan.xyz
 .uc.barbelfaldfee.com
 .do.barmfellists.com
+.chiyouranai.base.shop
+.tokujiro.base.shop
+.uranai1111.base.shop
 .ah.basothomug.com
 .bv.basquedbeloam.com
 .ck.bastardzingaro.com
@@ -8565,7 +8568,6 @@
 .ablogabouticeland.com
 .ablogica.com
 .ablybeastssarcastic.com
-.abmagbychan.com
 .abmap.com
 .abmhulatpos.com
 .abnad.net
@@ -10329,7 +10331,6 @@
 .alarmrisk.com
 .alas4kanmfa6a4mubte.com
 .alasvow.com
-.alblazikener.com
 .albonsa.com
 .albraixentor.com
 .album.click
@@ -10718,6 +10719,7 @@
 .amusing-branch.pro
 .amusing-breath.pro
 .amusing-injury.com
+.amusingarmorycomment.com
 .amusingbase.com
 .amusinghump.com
 .amusingstablegills.com
@@ -11444,6 +11446,7 @@
 .ashazkawg.com
 .ashcdn.com
 .ashenaletube.com
+.ashgreyfastest.com
 .ashhgo.com
 .ashnaamdigital.com
 .ashnmlhfqcnph.online
@@ -12429,7 +12432,6 @@
 .bartramagynous.com
 .barytemarkup.com
 .barytethynnid.com
-.base.shop
 .baseballletters.com
 .basednewsarticle.com
 .basejudgementquizmaster.com
@@ -13812,6 +13814,7 @@
 .botvwyytbwpdb.site
 .boudja.com
 .boufikesha.net
+.boughwarrior.com
 .bouglema.net
 .bouhoagy.net
 .boulevardrelative.com
@@ -14741,6 +14744,7 @@
 .camomilegentlemennotable.com
 .campaignified.xyz
 .campaignlook.com
+.campaigntracker.icu
 .campbellsvilleradio.com
 .camped-out.com
 .campfirecroutondecorator.com
@@ -16011,6 +16015,7 @@
 .clickwinks.com
 .clickwork7secure.com
 .clickxchange.com
+.clickzona.net
 .cliconvtracker.com
 .clictrck.com
 .clidelivery.com
@@ -16960,6 +16965,7 @@
 .covivado.club
 .cowardlydefinite.com
 .cowardprotest.com
+.cowardrainbowactual.com
 .cowardsagrias.com
 .cowbirdipecacs.top
 .cowpencinclis.com
@@ -18581,6 +18587,7 @@
 .dhyanyuan.com
 .dhynbvdepdqxend.com
 .di-ana.jp
+.diabetescareth.com
 .diabetesickness.com
 .diagnosedecorationvideotape.com
 .diagnoseundertake.com
@@ -26140,6 +26147,7 @@
 .hufskiwuho.com
 .hugdancing.com
 .hugeedate.com
+.hugefinnishcohort.com
 .hugeinjury.com
 .hugelovesgirl.com
 .hugelymarshy.com
@@ -29974,6 +29982,7 @@
 .libtl.com
 .licantrum.com
 .licenceconsiderably.com
+.lichsuvanhoa.net
 .lickingimprovementpropulsion.com
 .lidburger.com
 .lidglobe.com
@@ -45125,6 +45134,7 @@
 .tracker-2.com
 .tracker-tds.info
 .trackerflw.com
+.trackerredirect.online
 .trackerrr.com
 .trackertrak.com
 .tracking-aws-5.com
@@ -47886,6 +47896,7 @@
 .waxapushlite.com
 .waxlteab.com
 .waxsirens.com
+.way-to-ai.com
 .wayfarerniece.com
 .wayfarerorthodox.com
 .waylovee.com
