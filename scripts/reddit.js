@@ -1,5 +1,6 @@
 /*
- * Reddit 去广告和翻译：处理 Reddit App 的 GraphQL 响应（gql.reddit.com、gql-fed.reddit.com）。
+ * Reddit 去广告和翻译：处理 Reddit App 的 GraphQL 响应（gql.reddit.com、gql-fed.reddit.com），
+ * 以及 oauth.reddit.com 的 REST 响应（评论的 body / body_html，帖子的 title / selftext）。
  * Surge 一个响应只跑一个脚本，所以去广告和翻译放在同一个脚本里。
  *
  * 去广告（参考 xream 的脚本和 level3tjg/RedditFilter 的数据结构）：
@@ -145,8 +146,8 @@ function contentParagraphs(content) {
 
 // 每段原文后面紧跟它的译文，content 的每种写法都改。返回插了几段（按改得最多的那种写法算）
 function interleave(content, lookup) {
-  var counts = [0];
-  function count(i) { counts[i] = (counts[i] || 0) + 1; }
+  var counts = [0, 0, 0, 0];  // markdown、preview、html、richtext 各插了几段
+  function count(i) { counts[i]++; }
   if (typeof content.markdown === 'string') {
     content.markdown = content.markdown.split(/\n{2,}/).map(function (block) {
       var t = lookup(markdownText(block));
@@ -194,30 +195,69 @@ function interleave(content, lookup) {
 }
 
 // 返回 [{ texts: 要翻的段落, apply(lookup) → 用上了几段 }]，lookup(原文) 返回译文
+function hasBody(content) {
+  return isObject(content) && ['markdown', 'html', 'richtext', 'preview'].some(function (k) { return typeof content[k] === 'string' || isObject(content[k]); });
+}
+
+// REST 接口（oauth.reddit.com）的 body_html、selftext_html 是转义过一次的 html
+function unescapeEntities(s) { return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'); }
+
+function paragraphJob(content, done) {
+  var texts = contentParagraphs(content)
+    .map(function (p) { return p.trim().slice(0, MAX_CHARS); })
+    .filter(Boolean);
+  if (!texts.length) return null;
+  return { texts: texts, apply: function (lookup) { var n = interleave(content, lookup); if (done) done(); return n; } };
+}
+
+function titleJob(node) {
+  return { texts: [node.title.trim()], apply: function (lookup) {
+    var t = lookup(node.title);
+    if (!t) return 0;
+    node.title = node.title + '\n' + t;
+    return 1;
+  } };
+}
+
+// REST 格式的一对字段：markdown 写法（body、selftext）+ 转义过的 html（body_html、selftext_html）
+function restJob(node, mdKey, htmlKey) {
+  var content = { markdown: node[mdKey] };
+  if (typeof node[htmlKey] === 'string') content.html = unescapeEntities(node[htmlKey]);
+  return paragraphJob(content, function () {
+    node[mdKey] = content.markdown;
+    if (typeof node[htmlKey] === 'string') node[htmlKey] = escapeHtml(content.html);
+  });
+}
+
+// 返回 [{ texts: 要翻的段落, apply(lookup) → 用上了几段 }]，lookup(原文) 返回译文。
+// 不按类型名挑：GraphQL 里任何带正文的 content（帖子、评论，以及不认识的类型），REST 里的 body、selftext 都翻
 function collectJobs(value) {
   var jobs = [];
   (function walk(v) {
     if (Array.isArray(v)) { v.forEach(walk); return; }
-    if (!isObject(v)) return;
-    if ((isPost(v) || v.__typename === 'TitleCell') && typeof v.title === 'string' && v.title.trim()) {
-      var node = v;
-      jobs.push({ texts: [v.title.trim()], apply: function (lookup) {
-        var t = lookup(node.title);
-        if (!t) return 0;
-        node.title = node.title + '\n' + t;
-        return 1;
-      } });
-    }
-    if (ARGS.translate === 'all' && (isPost(v) || v.__typename === 'Comment') && isObject(v.content)) {
-      var content = v.content;
-      var texts = contentParagraphs(content)
-        .map(function (p) { return p.trim().slice(0, MAX_CHARS); })
-        .filter(Boolean);
-      if (texts.length) jobs.push({ texts: texts, apply: function (lookup) { return interleave(content, lookup); } });
+    if (!isObject(v) || v.__typename === 'AdPost') return;
+    var rest = typeof v.selftext === 'string' || /^t3_/.test(v.name || '');
+    if ((isPost(v) || v.__typename === 'TitleCell' || rest) && typeof v.title === 'string' && v.title.trim()) jobs.push(titleJob(v));
+    if (ARGS.translate === 'all') {
+      if (hasBody(v.content)) jobs.push(paragraphJob(v.content));
+      if (typeof v.body === 'string' && typeof v.body_html === 'string') jobs.push(restJob(v, 'body', 'body_html'));
+      if (typeof v.selftext === 'string' && v.selftext) jobs.push(restJob(v, 'selftext', 'selftext_html'));
     }
     Object.keys(v).forEach(function (k) { walk(v[k]); });
   })(value);
-  return jobs;
+  return jobs.filter(Boolean);
+}
+
+// 调试用：响应里有哪些 __typename、各几个
+function typenames(value) {
+  var counts = {};
+  (function walk(v) {
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (!isObject(v)) return;
+    if (v.__typename) counts[v.__typename] = (counts[v.__typename] || 0) + 1;
+    Object.keys(v).forEach(function (k) { walk(v[k]); });
+  })(value);
+  return Object.keys(counts).map(function (k) { return k + '×' + counts[k]; }).join(' ');
 }
 
 // 没有文字（纯表情、链接）、本来就是目标语言的不翻。目标是中文时，汉字过半又没有假名、谚文就算中文
@@ -398,12 +438,17 @@ async function main() {
   var body = $response.body;
   if (!body || typeof body !== 'string' || !/^\s*[{[]/.test(body)) return null;
   var json = JSON.parse(body);
+  if (ARGS.debug) {
+    var root = isObject(json.data) ? 'data.' + Object.keys(json.data).join(',') : Array.isArray(json) ? 'array' : Object.keys(json).slice(0, 5).join(',');
+    log($request.url.replace(/\?.*/, ''), root, typenames(json).slice(0, 300));
+  }
   var removed = removeAds(json);
   if (removed) log('删掉广告 ' + removed + ' 条');
   if (removed) adsRemoved = JSON.stringify(json);
 
   var canTranslate = ARGS.translate !== 'off' && (ARGS.keyList.length || ARGS.fallback === 'google');
   var jobs = canTranslate ? collectJobs(json) : [];
+  if (jobs.length) log('找到 ' + jobs.length + ' 处要看的文字');
   var texts = [];
   jobs.forEach(function (j) {
     j.texts.forEach(function (t) { if (texts.indexOf(t) === -1 && needsTranslation(t)) texts.push(t); });

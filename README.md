@@ -325,7 +325,7 @@ YouTube 字幕下面加一行 DeepL 翻译，评论区的外文评论也一样�
 https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
 ```
 
-给 Reddit 官方 App 用的，处理 App 的 GraphQL 接口（`gql.reddit.com`、`gql-fed.reddit.com`），要开 MITM。Safari 里的 reddit.com 由「网页弹窗和广告拦截」管。脚本是自己写的：`scripts/reddit.js`。
+给 Reddit 官方 App 用的，处理 App 的 GraphQL 接口（`gql.reddit.com`、`gql-fed.reddit.com`）和 REST 接口（`oauth.reddit.com`），要开 MITM。Safari 里的 reddit.com 由「网页弹窗和广告拦截」管。脚本是自己写的：`scripts/reddit.js`。
 
 ### 去广告
 
@@ -358,6 +358,8 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
 
 - 数据结构是照着 xream 的脚本和 [level3tjg/RedditFilter](https://github.com/level3tjg/RedditFilter) 写的，还没对着真机抓的响应核对过。哪里不对，打开「调试日志」看 Surge 日志里 `[Reddit]` 开头的几行。
 - 帖子和评论的正文 App 里有 markdown、richtext、html、preview 几种写法，不确定 App 显示哪个，几种都按段插了译文。段落是去掉格式后按文字对上的。
+- 不按类型名挑：GraphQL 里任何带正文的 `content`、REST 里的 `body`、`selftext` 都会翻，Reddit 改了类型名也照样能翻。
+- 打开「调试日志」后，每个响应都会打一行：接口地址、`data` 下面的字段名、有哪些 `__typename`。某个页面没翻译，把这几行发出来就能看出是哪个接口。
 - 测试：`node tools/test_reddit.js`。
 
 ## 规矩

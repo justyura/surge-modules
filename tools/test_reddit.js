@@ -8,7 +8,7 @@ const assert = require('assert');
 
 const CODE = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'reddit.js'), 'utf8');
 const K1 = '11111111-1111-1111-1111-111111111111:fx';
-const ARGS = (extra = '') => `keys=${K1}&target=ZH-HANS&translate=all&fallback=google&budget=4&debug=false${extra}`;
+const ARGS = (extra = '') => `keys=${K1}&target=ZH-HANS&translate=all&fallback=google&budget=4&debug=${process.env.DEBUG ? 'true' : 'false'}${extra}`;
 
 // behavior: 200 | 状态码 | 'hang'；google: true | false
 function run({ body, args = ARGS(), behavior = 200, google = true, store = {} }) {
@@ -36,7 +36,7 @@ function run({ body, args = ARGS(), behavior = 200, google = true, store = {} })
         },
       },
       $done: (out) => resolve({ out, json: out.body ? JSON.parse(out.body) : null, calls, store, seconds: (Date.now() - started) / 1000 }),
-      console: { log: () => {} },
+      console: { log: (m) => process.env.DEBUG && console.error(m) },
     };
     new Function(...Object.keys(env), CODE)(...Object.values(env));
   });
@@ -160,6 +160,42 @@ const postPage = () => ({
     const texts = r.calls.filter((x) => x.vendor === 'deepl').flatMap((x) => x.texts);
     assert.deepStrictEqual(texts, ['Repainting a chair', 'First I sanded the old paint.', 'Finally, see my photos.'], '一段一个 text，中文段落不发');
     console.log('ok  多段：一段原文一段译文交替，markdown / html / richtext 对得上，中文段落不翻');
+  }
+
+  // 2c. 类型名不认识也翻：只要 content 里有正文
+  {
+    const body = { data: { postInfoById: { __typename: 'SubredditPost', id: 't3_u', title: '你好', commentForest: { trees: [
+      { node: { __typename: 'CommentTreeNodeV2', id: 'c9', content: content('Nice work on this.') } },
+    ] } } } };
+    const r = await run({ body });
+    assert.strictEqual(r.json.data.postInfoById.commentForest.trees[0].node.content.markdown, 'Nice work on this.\n\n译:Nice work on this.');
+    console.log('ok  类型名不认识的评论，只要带正文也翻');
+  }
+
+  // 2d. oauth.reddit.com 的 REST 格式：帖子 title / selftext / selftext_html，评论 body / body_html（html 转义过一次）
+  {
+    const esc = (h) => h.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const listing = [
+      { kind: 'Listing', data: { children: [{ kind: 't3', data: {
+        name: 't3_r', title: 'Best hiking boots?', selftext: 'Looking for advice.\n\nBudget is small.',
+        selftext_html: esc('<div class="md"><p>Looking for advice.</p>\n\n<p>Budget is small.</p>\n</div>'),
+      } }] } },
+      { kind: 'Listing', data: { children: [{ kind: 't1', data: {
+        name: 't1_a', body: 'Check the outlet store.', body_html: esc('<div class="md"><p>Check the outlet store.</p>\n</div>'),
+        replies: { kind: 'Listing', data: { children: [{ kind: 't1', data: { name: 't1_b', body: '谢谢', body_html: esc('<div class="md"><p>谢谢</p>\n</div>') } }] } },
+      } }] } },
+    ];
+    const r = await run({ body: listing });
+    const p = r.json[0].data.children[0].data;
+    assert.strictEqual(p.title, 'Best hiking boots?\n译:Best hiking boots?');
+    assert.strictEqual(p.selftext, 'Looking for advice.\n\n译:Looking for advice.\n\nBudget is small.\n\n译:Budget is small.');
+    const unesc = (h) => h.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    assert.strictEqual(unesc(p.selftext_html), '<div class="md"><p>Looking for advice.</p><p>译:Looking for advice.</p>\n\n<p>Budget is small.</p><p>译:Budget is small.</p>\n</div>');
+    const c = r.json[1].data.children[0].data;
+    assert.strictEqual(c.body, 'Check the outlet store.\n\n译:Check the outlet store.');
+    assert.ok(unesc(c.body_html).includes('<p>Check the outlet store.</p><p>译:Check the outlet store.</p>'));
+    assert.strictEqual(c.replies.data.children[0].data.body, '谢谢', '中文回复不翻');
+    console.log('ok  REST 格式：帖子标题、正文和评论（含回复）按段翻译，转义的 html 也对得上');
   }
 
   // 3. 缓存：同样的内容第二次不再请求
