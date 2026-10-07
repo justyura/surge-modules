@@ -30,6 +30,7 @@ var CACHE_SIZE = 500;                   // 缓存最近多少段译文
 var TEXTS_PER_REQUEST = 50;             // DeepL 一次最多 50 段
 var BYTES_PER_REQUEST = 100000;         // DeepL 单次请求上限 128 KiB，留点余量
 var MAX_CHARS = 3000;                   // 太长的正文只翻前面这么多字
+var GOOGLE_CHARS = 1500;                // Google 兜底一个请求最多拼多少字（放在网址里，不能太长）
 var PARALLEL = 6;                       // 同时发几个请求：评论多的帖子拆成几份一起翻，不排队
 var MIN_BYTES_PER_REQUEST = 2000;       // 内容少时不拆得太碎
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
@@ -377,18 +378,49 @@ function googleTarget() {
   return t.split('-')[0].toLowerCase();
 }
 
-// Google 一段一个请求：帖子、评论里有换行，拼在一起拆不回来
-async function google(texts, result) {
-  await parallel(texts, 4, async function (text) {
-    var r = await request('get', {
-      url: 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=' + googleTarget() + '&q=' + encodeURIComponent(text),
-      timeout: timeout(),
-    });
-    try {
-      var out = JSON.parse(r.body)[0].map(function (seg) { return seg[0]; }).join('').trim();
-      if (out) result[text] = out;
-    } catch (e) {}
+function googleOnce(q) {
+  return request('get', {
+    url: 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=' + googleTarget() + '&q=' + encodeURIComponent(q),
+    timeout: timeout(),
+  }).then(function (r) {
+    try { return JSON.parse(r.body)[0].map(function (seg) { return seg[0]; }).join(''); } catch (e) { return null; }
   });
+}
+
+// 多段用换行拼成一个请求（段内的换行先换成空格），按换行拆回来；行数对不上的那一组再一段一段翻
+async function google(texts, result) {
+  var chunks = [];
+  var chunk = [];
+  var length = 0;
+  texts.forEach(function (t) {
+    var line = t.replace(/\s*\n\s*/g, ' ');
+    if (chunk.length && length + line.length > GOOGLE_CHARS) { chunks.push(chunk); chunk = []; length = 0; }
+    chunk.push(t);
+    length += line.length + 1;
+  });
+  if (chunk.length) chunks.push(chunk);
+  var single = [];
+  await parallel(chunks, 4, async function (lines) {
+    var out = await googleOnce(lines.map(function (t) { return t.replace(/\s*\n\s*/g, ' '); }).join('\n'));
+    var parts = out ? out.split('\n') : [];
+    if (parts.length !== lines.length) { single.push.apply(single, lines); return; }
+    lines.forEach(function (t, i) { if (parts[i].trim()) result[t] = parts[i].trim(); });
+  });
+  await parallel(single, 4, async function (t) {
+    var out = await googleOnce(t);
+    if (out && out.trim()) result[t] = out.trim();
+  });
+}
+
+// DeepL 用不了的原因，写进日志
+function deeplProblem(state) {
+  if (!ARGS.keyList.length) return '没填 DeepL 密钥（每个模块的参数是分开的，这个模块里也要填）';
+  var until = ARGS.keyList.map(function (k) { return state.paused[fingerprint(k)] || 0; });
+  if (until.some(function (t) { return t <= now(); })) return '';
+  var first = new Date(Math.min.apply(null, until) * 1000);
+  var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+  return ARGS.keyList.length + ' 个 key 都在暂停中（额度用完、key 无效或请求太多），最早 '
+    + (first.getMonth() + 1) + '-' + pad(first.getDate()) + ' ' + pad(first.getHours()) + ':' + pad(first.getMinutes()) + ' 恢复';
 }
 
 function utf8Length(text) {
@@ -419,7 +451,9 @@ async function translate(texts, state) {
     batch.size += size;
   });
   var leftover = [];
-  var deeplDown = !ARGS.keyList.length;
+  var problem = deeplProblem(state);
+  if (problem) log('DeepL 用不了：' + problem);
+  var deeplDown = !!problem;
   await parallel(batches, PARALLEL, async function (b) {
     var list = deeplDown ? null : await deepl(b, state);
     if (!list) {

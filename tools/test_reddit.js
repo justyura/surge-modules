@@ -8,11 +8,13 @@ const assert = require('assert');
 
 const CODE = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'reddit.js'), 'utf8');
 const K1 = '11111111-1111-1111-1111-111111111111:fx';
-const ARGS = (extra = '') => `keys=${K1}&target=ZH-HANS&translate=all&fallback=google&budget=4&debug=${process.env.DEBUG ? 'true' : 'false'}${extra}`;
+const ARGS = (extra = '', keys = K1) => `keys=${keys}&target=ZH-HANS&translate=all&fallback=google&budget=4&debug=true${extra}`;
 
 // behavior: 200 | 状态码 | 'hang'；google: true | false
+// google: true | false | 'merge'（多行合成一行返回，行数对不上）
 function run({ body, args = ARGS(), behavior = 200, google = true, store = {}, latency = 0 }) {
   const calls = [];
+  const logs = [];
   const started = Date.now();
   return new Promise((resolve) => {
     const env = {
@@ -32,11 +34,12 @@ function run({ body, args = ARGS(), behavior = 200, google = true, store = {}, l
           const q = decodeURIComponent(/[?&]q=([^&]*)/.exec(req.url)[1]);
           calls.push({ vendor: 'google', q });
           if (!google) return setTimeout(() => cb('down', null, null));
-          setTimeout(() => cb(null, { status: 200 }, JSON.stringify([[['谷:' + q, q]]])));
+          const lines = q.split('\n').map((l) => '谷:' + l);
+          setTimeout(() => cb(null, { status: 200 }, JSON.stringify([[[google === 'merge' ? lines.join(' ') : lines.join('\n'), q]]])));
         },
       },
-      $done: (out) => resolve({ out, json: out.body ? JSON.parse(out.body) : null, calls, store, seconds: (Date.now() - started) / 1000 }),
-      console: { log: (m) => process.env.DEBUG && console.error(m) },
+      $done: (out) => resolve({ out, json: out.body ? JSON.parse(out.body) : null, calls, logs, store, seconds: (Date.now() - started) / 1000 }),
+      console: { log: (m) => { logs.push(m); if (process.env.DEBUG) console.error(m); } },
     };
     new Function(...Object.keys(env), CODE)(...Object.values(env));
   });
@@ -237,14 +240,31 @@ const postPage = () => ({
   {
     const r = await run({ body: feed(), behavior: 456 });
     assert.strictEqual(r.json.data.home.elements.edges[0].node.title, 'Morning walk by the lake\n谷:Morning walk by the lake');
-    assert.ok(r.calls.filter((c) => c.vendor === 'google').every((c) => !c.q.includes('\n') || c.q.startsWith('Body')));
+    assert.strictEqual(r.calls.filter((c) => c.vendor === 'google').length, 1, 'Google 多段拼成一个请求');
+    assert.strictEqual(r.json.data.home.elements.edges[0].node.content.markdown, 'Body of t3_a\n\n谷:Body of t3_a');
+    // 行数对不上：那一组一段一段重翻
+    const rm = await run({ body: feed(), behavior: 456, google: 'merge' });
+    assert.strictEqual(rm.json.data.home.elements.edges[0].node.title, 'Morning walk by the lake\n谷:Morning walk by the lake');
+    assert.ok(rm.calls.filter((c) => c.vendor === 'google').length > 1);
     const r2 = await run({ body: feed(), behavior: 403, google: false });
     assert.strictEqual(r2.json.data.home.elements.edges.length, 4);
     assert.strictEqual(r2.json.data.home.elements.edges[0].node.title, 'Morning walk by the lake');
     const r3 = await run({ body: feed(), behavior: 'hang', args: ARGS('&budget=2') });
     assert.strictEqual(r3.json.data.home.elements.edges.length, 4, '超时也要去广告');
     assert.ok(r3.seconds >= 3.9 && r3.seconds < 5, `应该 4 秒左右返回，实际 ${r3.seconds}`);
-    console.log(`ok  DeepL 失败用 Google，都失败只去广告，卡死时 ${r3.seconds.toFixed(1)} 秒返回去掉广告的版本`);
+    console.log(`ok  DeepL 失败用 Google（多段一个请求，对不上再逐段），都失败只去广告，卡死时 ${r3.seconds.toFixed(1)} 秒返回去掉广告的版本`);
+  }
+
+  // 5b. 日志写清楚 DeepL 为什么用不了：没填 key / key 都在暂停
+  {
+    const r = await run({ body: feed(), args: ARGS('', '填你的DeepL密钥，多个用竖线分隔') });
+    assert.ok(r.logs.some((l) => l.includes('没填 DeepL 密钥')), r.logs.join('\n'));
+    assert.ok(!r.calls.some((c) => c.vendor === 'deepl'));
+    const r1 = await run({ body: feed(), behavior: 456 });
+    const r2 = await run({ body: postPage(), store: r1.store });
+    assert.ok(r2.logs.some((l) => /1 个 key 都在暂停中.*恢复/.test(l)), r2.logs.join('\n'));
+    assert.ok(!r2.calls.some((c) => c.vendor === 'deepl'), '暂停中的 key 不再请求');
+    console.log('ok  日志写清楚 DeepL 用不了的原因：没填 key、key 都在暂停中');
   }
 
   // 6. 没广告、不用翻译：原样放行；不是 JSON：放行
