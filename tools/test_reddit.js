@@ -11,7 +11,7 @@ const K1 = '11111111-1111-1111-1111-111111111111:fx';
 const ARGS = (extra = '') => `keys=${K1}&target=ZH-HANS&translate=all&fallback=google&budget=4&debug=${process.env.DEBUG ? 'true' : 'false'}${extra}`;
 
 // behavior: 200 | 状态码 | 'hang'；google: true | false
-function run({ body, args = ARGS(), behavior = 200, google = true, store = {} }) {
+function run({ body, args = ARGS(), behavior = 200, google = true, store = {}, latency = 0 }) {
   const calls = [];
   const started = Date.now();
   return new Promise((resolve) => {
@@ -26,7 +26,7 @@ function run({ body, args = ARGS(), behavior = 200, google = true, store = {} })
           calls.push({ vendor: 'deepl', texts: b.text, source: b.source_lang });
           if (behavior === 'hang') return;
           if (behavior !== 200) return setTimeout(() => cb(null, { status: behavior }, '{}'));
-          setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ translations: b.text.map((t) => ({ text: '译:' + t })) })));
+          setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ translations: b.text.map((t) => ({ text: '译:' + t })) })), latency);
         },
         get(req, cb) {
           const q = decodeURIComponent(/[?&]q=([^&]*)/.exec(req.url)[1]);
@@ -196,6 +196,19 @@ const postPage = () => ({
     assert.ok(unesc(c.body_html).includes('<p>Check the outlet store.</p><p>译:Check the outlet store.</p>'));
     assert.strictEqual(c.replies.data.children[0].data.body, '谢谢', '中文回复不翻');
     console.log('ok  REST 格式：帖子标题、正文和评论（含回复）按段翻译，转义的 html 也对得上');
+  }
+
+  // 2e. 评论多的帖子：拆成几份同时发，DeepL 每个请求 1.5 秒、限时 4 秒也能整页翻完
+  {
+    const trees = Array.from({ length: 300 }, (_, i) => ({ node: { __typename: 'Comment', id: 'c' + i, content: content(`Comment number ${i} says something useful.\n\nAnd a second paragraph ${i}.`) } }));
+    const body = { data: { postInfoById: { __typename: 'SubredditPost', id: 't3_big', title: '大帖子', commentForest: { trees } } } };
+    const r = await run({ body, latency: 1500 });
+    const out = r.json.data.postInfoById.commentForest.trees;
+    assert.ok(out.every((t) => t.node.content.markdown.includes('译:')), '最后一条也要翻到');
+    const d = r.calls.filter((c) => c.vendor === 'deepl');
+    assert.ok(d.length <= 12 && d.length >= 6, `600 段应该拆成 6～12 个请求，实际 ${d.length}`);
+    assert.ok(r.seconds < 3.5, `应该两轮内翻完，实际 ${r.seconds} 秒`);
+    console.log(`ok  评论多的帖子：600 段拆成 ${d.length} 个请求同时发，${r.seconds.toFixed(1)} 秒整页翻完`);
   }
 
   // 3. 缓存：同样的内容第二次不再请求

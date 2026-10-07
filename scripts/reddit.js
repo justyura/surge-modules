@@ -30,7 +30,8 @@ var CACHE_SIZE = 500;                   // 缓存最近多少段译文
 var TEXTS_PER_REQUEST = 50;             // DeepL 一次最多 50 段
 var BYTES_PER_REQUEST = 100000;         // DeepL 单次请求上限 128 KiB，留点余量
 var MAX_CHARS = 3000;                   // 太长的正文只翻前面这么多字
-var PARALLEL = 3;
+var PARALLEL = 6;                       // 同时发几个请求：评论多的帖子拆成几份一起翻，不排队
+var MIN_BYTES_PER_REQUEST = 2000;       // 内容少时不拆得太碎
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
 var AD_LISTS = ['commentsPageAds', 'commentTreeAds', 'pdpCommentsAds'];
 
@@ -402,11 +403,14 @@ function utf8Length(text) {
 // 一段一个 text 发给 DeepL，每段单独识别语言。返回 { 原文: 译文 }
 async function translate(texts, state) {
   var result = {};
+  // 按总量平均分成最多 PARALLEL 份同时发，DeepL 的耗时跟字数走，分开翻比排队快
+  var total = texts.reduce(function (n, t) { return n + utf8Length(t) + 16; }, 0);
+  var limit = Math.min(BYTES_PER_REQUEST, Math.max(MIN_BYTES_PER_REQUEST, Math.ceil(total / PARALLEL)));
   var batches = [];
   var batch = null;
   texts.forEach(function (t) {
     var size = utf8Length(t) + 16;
-    if (!batch || batch.length >= TEXTS_PER_REQUEST || batch.size + size > BYTES_PER_REQUEST) {
+    if (!batch || batch.length >= TEXTS_PER_REQUEST || (batch.length && batch.size + size > limit)) {
       batch = [];
       batch.size = 0;
       batches.push(batch);
@@ -481,7 +485,9 @@ async function main() {
     });
     var lookup = function (text) { var k = norm(text); return k ? byNorm[k] : undefined; };
     jobs.forEach(function (j) { translated += j.apply(lookup); });
-    log('要翻 ' + texts.length + ' 段，缓存命中 ' + (texts.length - missing.length) + ' 段，用上 ' + translated + ' 段');
+    var left = texts.filter(function (t) { return !map[t]; }).length;
+    log('要翻 ' + texts.length + ' 段，缓存命中 ' + (texts.length - missing.length) + ' 段，用上 ' + translated + ' 段'
+      + (left ? '，' + left + ' 段没翻完（超时或出错），重新打开会接着翻' : ''));
   }
   return removed || translated ? JSON.stringify(json) : null;
 }
