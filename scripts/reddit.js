@@ -7,8 +7,8 @@
  *   - 帖子详情页的 commentsPageAds、commentTreeAds、pdpCommentsAds
  *   - 评论树里混进来的 AdPost
  *
- * 翻译：帖子标题、帖子正文、评论，译文接在原文下面。正文和评论的 content 里有
- * markdown、richtext、html、preview 几种写法，App 用哪个不确定，有的都改。
+ * 翻译：帖子标题、帖子正文、评论。正文和评论按段翻，一段原文后面紧跟它的译文。
+ * content 里有 markdown、richtext、html、preview 几种写法，App 用哪个不确定，有的都改。
  * 已经是目标语言（中文）、纯表情的不翻。
  *
  * DeepL 部分照搬 youtube-subtitles.js：多个 key 按顺序用，出错按类型暂停，全部不行用
@@ -109,22 +109,67 @@ function markdownText(md) {
     .trim();
 }
 
-function contentText(content) {
-  if (typeof content.markdown === 'string') return markdownText(content.markdown);
-  if (typeof content.preview === 'string') return content.preview.trim();
-  if (typeof content.html === 'string') return content.html.replace(/<br\s*\/?>|<\/p>/gi, '\n').replace(/<[^>]+>/g, '').trim();
-  return '';
-}
+// 比较段落用：只留字母和数字。markdown、html、richtext 里同一段的格式不一样，去掉格式后才对得上
+function norm(text) { return String(text).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''); }
 
 function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
-// 译文作为新的段落接在 content 的每种写法后面
-function appendToContent(content, translation) {
-  var paragraphs = translation.split(/\n{2,}/).filter(function (p) { return p.trim(); });
-  if (typeof content.markdown === 'string') content.markdown += '\n\n' + paragraphs.join('\n\n');
-  if (typeof content.preview === 'string') content.preview += '\n' + translation;
+// html 里的一段：段落、标题、列表、引用、代码、表格
+var HTML_BLOCK = /<(p|h[1-6]|ul|ol|blockquote|pre|table)\b[^>]*>[\s\S]*?<\/\1>/gi;
+
+function htmlText(html) {
+  return html.replace(/<br\s*\/?>|<\/(?:p|li)>/gi, '\n').replace(/<[^>]+>/g, '')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+    .trim();
+}
+
+// richtext 一个块里所有的文字（text、link 等节点的 t）
+function richText(block) {
+  var parts = [];
+  (function walk(v) {
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (!isObject(v)) return;
+    if (typeof v.t === 'string') parts.push(v.t);
+    Object.keys(v).forEach(function (k) { if (k !== 't') walk(v[k]); });
+  })(block);
+  return parts.join(' ');
+}
+
+// 正文按段拆开：有 markdown 用 markdown（空行分段），没有就用 preview、html
+function contentParagraphs(content) {
+  if (typeof content.markdown === 'string') return content.markdown.split(/\n{2,}/).map(markdownText);
+  if (typeof content.preview === 'string') return content.preview.split(/\n{2,}/);
+  if (typeof content.html === 'string') return (content.html.match(HTML_BLOCK) || []).map(htmlText);
+  return [];
+}
+
+// 每段原文后面紧跟它的译文，content 的每种写法都改。返回插了几段（按改得最多的那种写法算）
+function interleave(content, lookup) {
+  var counts = [0];
+  function count(i) { counts[i] = (counts[i] || 0) + 1; }
+  if (typeof content.markdown === 'string') {
+    content.markdown = content.markdown.split(/\n{2,}/).map(function (block) {
+      var t = lookup(markdownText(block));
+      if (!t) return block;
+      count(0);
+      return block + '\n\n' + t;
+    }).join('\n\n');
+  }
+  if (typeof content.preview === 'string') {
+    content.preview = content.preview.split(/\n{2,}/).map(function (p) {
+      var t = lookup(p);
+      if (!t) return p;
+      count(1);
+      return p + '\n\n' + t;
+    }).join('\n\n');
+  }
   if (typeof content.html === 'string') {
-    content.html += paragraphs.map(function (p) { return '<p>' + escapeHtml(p).replace(/\n/g, '<br>') + '</p>'; }).join('');
+    content.html = content.html.replace(HTML_BLOCK, function (block) {
+      var t = lookup(htmlText(block));
+      if (!t) return block;
+      count(2);
+      return block + t.split(/\n{2,}/).map(function (p) { return '<p>' + escapeHtml(p).replace(/\n/g, '<br>') + '</p>'; }).join('');
+    });
   }
   // richtext 是 Reddit 自己的 RTJSON：{ document: [{ e: 'par', c: [{ e: 'text', t: '…' }] }] }，有时是字符串
   if (content.richtext) {
@@ -132,32 +177,43 @@ function appendToContent(content, translation) {
     try {
       var doc = isString ? JSON.parse(content.richtext) : content.richtext;
       if (doc && Array.isArray(doc.document)) {
-        paragraphs.forEach(function (p) { doc.document.push({ e: 'par', c: [{ e: 'text', t: p }] }); });
+        var blocks = [];
+        doc.document.forEach(function (block) {
+          blocks.push(block);
+          var t = lookup(richText(block));
+          if (!t) return;
+          count(3);
+          t.split(/\n{2,}/).forEach(function (p) { blocks.push({ e: 'par', c: [{ e: 'text', t: p }] }); });
+        });
+        doc.document = blocks;
         content.richtext = isString ? JSON.stringify(doc) : doc;
       }
     } catch (e) {}
   }
+  return Math.max.apply(null, counts);
 }
 
-// 返回 [{ text, apply(译文) }]
+// 返回 [{ texts: 要翻的段落, apply(lookup) → 用上了几段 }]，lookup(原文) 返回译文
 function collectJobs(value) {
   var jobs = [];
-  var seen = [];
-  function addContent(content) {
-    if (!isObject(content) || seen.indexOf(content) !== -1) return;
-    seen.push(content);
-    var text = contentText(content);
-    if (text) jobs.push({ text: text.slice(0, MAX_CHARS), apply: function (t) { appendToContent(content, t); } });
-  }
   (function walk(v) {
     if (Array.isArray(v)) { v.forEach(walk); return; }
     if (!isObject(v)) return;
     if ((isPost(v) || v.__typename === 'TitleCell') && typeof v.title === 'string' && v.title.trim()) {
       var node = v;
-      jobs.push({ text: v.title.trim(), apply: function (t) { node.title = node.title + '\n' + t; } });
+      jobs.push({ texts: [v.title.trim()], apply: function (lookup) {
+        var t = lookup(node.title);
+        if (!t) return 0;
+        node.title = node.title + '\n' + t;
+        return 1;
+      } });
     }
-    if (ARGS.translate === 'all') {
-      if (isPost(v) || v.__typename === 'Comment') addContent(v.content);
+    if (ARGS.translate === 'all' && (isPost(v) || v.__typename === 'Comment') && isObject(v.content)) {
+      var content = v.content;
+      var texts = contentParagraphs(content)
+        .map(function (p) { return p.trim().slice(0, MAX_CHARS); })
+        .filter(Boolean);
+      if (texts.length) jobs.push({ texts: texts, apply: function (lookup) { return interleave(content, lookup); } });
     }
     Object.keys(v).forEach(function (k) { walk(v[k]); });
   })(value);
@@ -347,10 +403,13 @@ async function main() {
   if (removed) adsRemoved = JSON.stringify(json);
 
   var canTranslate = ARGS.translate !== 'off' && (ARGS.keyList.length || ARGS.fallback === 'google');
-  var jobs = canTranslate ? collectJobs(json).filter(function (j) { return needsTranslation(j.text); }) : [];
+  var jobs = canTranslate ? collectJobs(json) : [];
+  var texts = [];
+  jobs.forEach(function (j) {
+    j.texts.forEach(function (t) { if (texts.indexOf(t) === -1 && needsTranslation(t)) texts.push(t); });
+  });
   var translated = 0;
-  if (jobs.length) {
-    var texts = jobs.map(function (j) { return j.text; }).filter(function (t, i, all) { return all.indexOf(t) === i; });
+  if (texts.length) {
     var cache = loadCache();
     var known = {};
     cache.forEach(function (e) { known[e[0]] = e[1]; });
@@ -371,11 +430,13 @@ async function main() {
       });
       if (Object.keys(fresh).length) saveCache(cache);
     }
-    jobs.forEach(function (j) {
-      var t = map[j.text];
-      if (t && t !== j.text) { j.apply(t); translated++; }
+    var byNorm = {};
+    texts.forEach(function (t) {
+      if (map[t] && map[t] !== t && norm(t)) byNorm[norm(t)] = map[t];
     });
-    log('要翻 ' + texts.length + ' 段，缓存命中 ' + (texts.length - missing.length) + ' 段，用上 ' + translated + ' 处');
+    var lookup = function (text) { var k = norm(text); return k ? byNorm[k] : undefined; };
+    jobs.forEach(function (j) { translated += j.apply(lookup); });
+    log('要翻 ' + texts.length + ' 段，缓存命中 ' + (texts.length - missing.length) + ' 段，用上 ' + translated + ' 段');
   }
   return removed || translated ? JSON.stringify(json) : null;
 }

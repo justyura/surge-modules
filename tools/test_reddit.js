@@ -42,12 +42,16 @@ function run({ body, args = ARGS(), behavior = 200, google = true, store = {} })
   });
 }
 
-const content = (md) => ({
-  markdown: md,
-  preview: md,
-  html: '<div class="md"><p>' + md + '</p></div>',
-  richtext: JSON.stringify({ document: [{ e: 'par', c: [{ e: 'text', t: md }] }] }),
-});
+// 一段一行；markdown 空行分段，html 一段一个 <p>，richtext 一段一个 par
+const content = (md) => {
+  const paras = md.split('\n\n');
+  return {
+    markdown: md,
+    preview: md,
+    html: '<div class="md">' + paras.map((p) => '<p>' + p + '</p>').join('') + '</div>',
+    richtext: JSON.stringify({ document: paras.map((p) => ({ e: 'par', c: [{ e: 'text', t: p }] })) }),
+  };
+};
 const post = (id, title, extra = {}) => ({ __typename: 'SubredditPost', id, title, isNsfw: false, content: content('Body of ' + id), ...extra });
 
 const feed = () => ({
@@ -116,8 +120,8 @@ const postPage = () => ({
     assert.deepStrictEqual(p.commentForest.trees.map((t) => t.node.id), ['c1', 'c2', 'c3', 'c4']);
     const c1 = p.commentForest.trees[0].node.content;
     assert.strictEqual(c1.markdown, 'Try a little oil on the hinge.\n\n译:Try a little oil on the hinge.');
-    assert.strictEqual(c1.preview, 'Try a little oil on the hinge.\n译:Try a little oil on the hinge.');
-    assert.strictEqual(c1.html, '<div class="md"><p>Try a little oil on the hinge.</p></div><p>译:Try a little oil on the hinge.</p>');
+    assert.strictEqual(c1.preview, 'Try a little oil on the hinge.\n\n译:Try a little oil on the hinge.');
+    assert.strictEqual(c1.html, '<div class="md"><p>Try a little oil on the hinge.</p><p>译:Try a little oil on the hinge.</p></div>');
     assert.deepStrictEqual(JSON.parse(c1.richtext).document[1], { e: 'par', c: [{ e: 'text', t: '译:Try a little oil on the hinge.' }] });
     assert.strictEqual(p.commentForest.trees[1].node.content.markdown, '同意楼上');
     assert.strictEqual(p.commentForest.trees[2].node.content.markdown, '👍👍');
@@ -127,6 +131,35 @@ const postPage = () => ({
     assert.strictEqual(texts.filter((t) => t === 'Try a little oil on the hinge.').length, 1);
     assert.strictEqual(p.title, 'How do I fix a squeaky door?\n译:How do I fix a squeaky door?');
     console.log('ok  帖子页：三个广告位清空、评论树广告删掉，正文和评论的 markdown / preview / html / richtext 都加译文');
+  }
+
+  // 2b. 多段：一段原文一段译文交替，中文段落、空段不插译文；markdown 带格式也对得上 html、richtext
+  {
+    const md = 'First I sanded the **old** paint.\n\n然后上了底漆。\n\nFinally, see [my photos](https://example.com/p).';
+    const c = content(md);
+    c.html = '<div class="md"><p>First I sanded the <strong>old</strong> paint.</p><p>然后上了底漆。</p><p>Finally, see <a href="https://example.com/p">my photos</a>.</p></div>';
+    c.richtext = JSON.stringify({ document: [
+      { e: 'par', c: [{ e: 'text', t: 'First I sanded the ' }, { e: 'text', t: 'old', f: [[1, 0, 3]] }, { e: 'text', t: ' paint.' }] },
+      { e: 'par', c: [{ e: 'text', t: '然后上了底漆。' }] },
+      { e: 'par', c: [{ e: 'text', t: 'Finally, see ' }, { e: 'link', u: 'https://example.com/p', t: 'my photos' }, { e: 'text', t: '.' }] },
+    ] });
+    const body = { data: { postInfoById: { __typename: 'SubredditPost', id: 't3_m', title: 'Repainting a chair', content: c } } };
+    const r = await run({ body });
+    const out = r.json.data.postInfoById.content;
+    assert.strictEqual(out.markdown, [
+      'First I sanded the **old** paint.', '译:First I sanded the old paint.',
+      '然后上了底漆。',
+      'Finally, see [my photos](https://example.com/p).', '译:Finally, see my photos.',
+    ].join('\n\n'));
+    assert.strictEqual(out.html, '<div class="md"><p>First I sanded the <strong>old</strong> paint.</p><p>译:First I sanded the old paint.</p>'
+      + '<p>然后上了底漆。</p><p>Finally, see <a href="https://example.com/p">my photos</a>.</p><p>译:Finally, see my photos.</p></div>');
+    const doc = JSON.parse(out.richtext).document;
+    assert.deepStrictEqual(doc.map((b) => b.c.map((n) => n.t).join('')), [
+      'First I sanded the old paint.', '译:First I sanded the old paint.', '然后上了底漆。', 'Finally, see my photos.', '译:Finally, see my photos.',
+    ]);
+    const texts = r.calls.filter((x) => x.vendor === 'deepl').flatMap((x) => x.texts);
+    assert.deepStrictEqual(texts, ['Repainting a chair', 'First I sanded the old paint.', 'Finally, see my photos.'], '一段一个 text，中文段落不发');
+    console.log('ok  多段：一段原文一段译文交替，markdown / html / richtext 对得上，中文段落不翻');
   }
 
   // 3. 缓存：同样的内容第二次不再请求

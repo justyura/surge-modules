@@ -337,8 +337,8 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
 
 ### 翻译
 
-- 标题、帖子正文、评论的译文接在原文下面。中文和纯表情的不翻。
-- 每段单独识别语言，一个响应一般一个 DeepL 请求翻完。翻过的缓存最近 500 段。
+- 标题的译文接在下面。帖子正文和评论按段对照：一段原文，下面紧跟这一段的译文，再下一段原文。
+- 中文段落和纯表情不翻。每段单独识别语言，一个响应一般一个 DeepL 请求翻完。翻过的缓存最近 500 段。
 - 最多等 4 秒（参数「最长等待」），没翻完的显示原文，广告照样去掉。
 - 评论多的帖子很费额度。只想看标题就把「翻译范围」改成 `title`，不想翻译改成 `off`。
 - DeepL key 可以和「YouTube 双语字幕」填一样的，哪个 key 被暂停两边共用。
@@ -357,7 +357,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
 ### 需要知道的
 
 - 数据结构是照着 xream 的脚本和 [level3tjg/RedditFilter](https://github.com/level3tjg/RedditFilter) 写的，还没对着真机抓的响应核对过。哪里不对，打开「调试日志」看 Surge 日志里 `[Reddit]` 开头的几行。
-- 帖子和评论的正文 App 里有 markdown、richtext、html、preview 几种写法，不确定 App 显示哪个，几种都加了译文。
+- 帖子和评论的正文 App 里有 markdown、richtext、html、preview 几种写法，不确定 App 显示哪个，几种都按段插了译文。段落是去掉格式后按文字对上的。
 - 测试：`node tools/test_reddit.js`。
 
 ## 规矩
