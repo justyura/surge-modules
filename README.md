@@ -11,6 +11,7 @@
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
 | YouTube 双语字幕 | YouTube 字幕和评论加 DeepL 翻译，多个 key 自动切换，可以标生词 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
+| Reddit 去广告和翻译 | Reddit App 的推广帖去掉，标题、正文、评论加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule` |
 
 ## 代理流量面板
 
@@ -317,6 +318,47 @@ YouTube 字幕下面加一行 DeepL 翻译，评论区的外文评论也一样�
 - 支持 YouTube 的三种字幕格式：json3、srv3 / srv1 XML、WebVTT。自动生成字幕会把逐词的片段合成整句再翻。
 - 测试：`node tools/test_subtitles.js`，模拟 Surge 和 DeepL / Google / 生词服务接口，覆盖 key 切换、暂停、兜底、缓存、分批、三种字幕格式、标生词和评论翻译。
 - DeepL 的条款是一人一个免费账号，多个免费账号轮着用超出额度违反条款，账号可能被封，自己把握。
+
+## Reddit 去广告和翻译
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
+```
+
+给 Reddit 官方 App 用的，处理 App 的 GraphQL 接口（`gql.reddit.com`、`gql-fed.reddit.com`），要开 MITM。Safari 里的 reddit.com 由「网页弹窗和广告拦截」管。脚本是自己写的：`scripts/reddit.js`。
+
+### 去广告
+
+- 首页、版块、搜索信息流里的推广帖（`AdPost`、带广告标记的卡片）
+- 帖子页正文下面、评论中间插的广告
+- NSFW 标记不动
+
+不放进「App 去广告合集」：Surge 一个响应只跑一个脚本，去广告和翻译得在同一个脚本里。
+
+### 翻译
+
+- 标题、帖子正文、评论的译文接在原文下面。中文和纯表情的不翻。
+- 每段单独识别语言，一个响应一般一个 DeepL 请求翻完。翻过的缓存最近 500 段。
+- 最多等 4 秒（参数「最长等待」），没翻完的显示原文，广告照样去掉。
+- 评论多的帖子很费额度。只想看标题就把「翻译范围」改成 `title`，不想翻译改成 `off`。
+- DeepL key 可以和「YouTube 双语字幕」填一样的，哪个 key 被暂停两边共用。
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
+| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
+| 翻译范围 | all | all 标题、正文、评论都翻；title 只翻标题；off 只去广告 |
+| 备用翻译 | google | off 表示不用 Google 兜底 |
+| 最长等待 | 4 | 最多等几秒翻译 |
+| 调试日志 | false | true 打印删了几条广告、翻了几段 |
+
+### 需要知道的
+
+- 数据结构是照着 xream 的脚本和 [level3tjg/RedditFilter](https://github.com/level3tjg/RedditFilter) 写的，还没对着真机抓的响应核对过。哪里不对，打开「调试日志」看 Surge 日志里 `[Reddit]` 开头的几行。
+- 帖子和评论的正文 App 里有 markdown、richtext、html、preview 几种写法，不确定 App 显示哪个，几种都加了译文。
+- 测试：`node tools/test_reddit.js`。
 
 ## 规矩
 

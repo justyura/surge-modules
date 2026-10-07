@@ -1,0 +1,176 @@
+#!/usr/bin/env node
+// scripts/reddit.js 的测试：模拟 Surge 环境和 DeepL / Google 接口，数据仿 Reddit App 的 GraphQL 响应。
+//
+//   node tools/test_reddit.js
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+
+const CODE = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'reddit.js'), 'utf8');
+const K1 = '11111111-1111-1111-1111-111111111111:fx';
+const ARGS = (extra = '') => `keys=${K1}&target=ZH-HANS&translate=all&fallback=google&budget=4&debug=false${extra}`;
+
+// behavior: 200 | 状态码 | 'hang'；google: true | false
+function run({ body, args = ARGS(), behavior = 200, google = true, store = {} }) {
+  const calls = [];
+  const started = Date.now();
+  return new Promise((resolve) => {
+    const env = {
+      $argument: args,
+      $request: { url: 'https://gql-fed.reddit.com/' },
+      $response: { body: JSON.stringify(body) },
+      $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
+      $httpClient: {
+        post(req, cb) {
+          const b = JSON.parse(req.body);
+          calls.push({ vendor: 'deepl', texts: b.text, source: b.source_lang });
+          if (behavior === 'hang') return;
+          if (behavior !== 200) return setTimeout(() => cb(null, { status: behavior }, '{}'));
+          setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ translations: b.text.map((t) => ({ text: '译:' + t })) })));
+        },
+        get(req, cb) {
+          const q = decodeURIComponent(/[?&]q=([^&]*)/.exec(req.url)[1]);
+          calls.push({ vendor: 'google', q });
+          if (!google) return setTimeout(() => cb('down', null, null));
+          setTimeout(() => cb(null, { status: 200 }, JSON.stringify([[['谷:' + q, q]]])));
+        },
+      },
+      $done: (out) => resolve({ out, json: out.body ? JSON.parse(out.body) : null, calls, store, seconds: (Date.now() - started) / 1000 }),
+      console: { log: () => {} },
+    };
+    new Function(...Object.keys(env), CODE)(...Object.values(env));
+  });
+}
+
+const content = (md) => ({
+  markdown: md,
+  preview: md,
+  html: '<div class="md"><p>' + md + '</p></div>',
+  richtext: JSON.stringify({ document: [{ e: 'par', c: [{ e: 'text', t: md }] }] }),
+});
+const post = (id, title, extra = {}) => ({ __typename: 'SubredditPost', id, title, isNsfw: false, content: content('Body of ' + id), ...extra });
+
+const feed = () => ({
+  data: {
+    home: {
+      elements: {
+        edges: [
+          { node: post('t3_a', 'Morning walk by the lake') },
+          { node: { __typename: 'AdPost', id: 't3_ad1', title: 'Buy shoes now' } },
+          { node: { __typename: 'CellGroup', id: 'g1', adPayload: { impressionId: 'x' }, cells: [] } },
+          { node: { __typename: 'CellGroup', id: 'g2', cells: [{ __typename: 'AdMetadataCell' }, { __typename: 'TitleCell', title: 'Sponsored pick' }] } },
+          { node: { __typename: 'CellGroup', id: 'g3', cells: [{ __typename: 'TitleCell', title: 'A quiet library corner' }, { __typename: 'ActionCell', score: 5 }] } },
+          { node: post('t3_b', '今天的晚饭') },
+          { node: post('t3_c', 'Weekend plans', { isNsfw: true }) },
+        ],
+      },
+    },
+  },
+});
+
+const postPage = () => ({
+  data: {
+    postInfoById: {
+      __typename: 'SubredditPost',
+      id: 't3_p',
+      title: 'How do I fix a squeaky door?',
+      content: content('It squeaks **every** time. See [this video](https://example.com/v).'),
+      commentsPageAds: [{ __typename: 'AdPost', id: 'ad1' }],
+      commentTreeAds: [{ __typename: 'AdPost', id: 'ad2' }],
+      pdpCommentsAds: [{ __typename: 'AdPost', id: 'ad3' }],
+      commentForest: {
+        trees: [
+          { depth: 0, node: { __typename: 'Comment', id: 'c1', content: content('Try a little oil on the hinge.') } },
+          { depth: 0, node: { __typename: 'AdPost', id: 'ad4' } },
+          { depth: 1, node: { __typename: 'Comment', id: 'c2', content: content('同意楼上') } },
+          { depth: 1, node: { __typename: 'Comment', id: 'c3', content: content('👍👍') } },
+          { depth: 0, node: { __typename: 'Comment', id: 'c4', content: content('Try a little oil on the hinge.') } },
+        ],
+      },
+    },
+  },
+});
+
+(async () => {
+  // 1. 信息流：各种广告删掉，标题加译文，中文标题不翻，NSFW 标记不动
+  {
+    const r = await run({ body: feed() });
+    const edges = r.json.data.home.elements.edges;
+    assert.deepStrictEqual(edges.map((e) => e.node.id), ['t3_a', 'g3', 't3_b', 't3_c']);
+    assert.strictEqual(edges[0].node.title, 'Morning walk by the lake\n译:Morning walk by the lake');
+    assert.strictEqual(edges[1].node.cells[0].title, 'A quiet library corner\n译:A quiet library corner');
+    assert.strictEqual(edges[2].node.title, '今天的晚饭');
+    assert.strictEqual(edges[3].node.isNsfw, true);
+    assert.strictEqual(edges[0].node.content.markdown, 'Body of t3_a\n\n译:Body of t3_a', '信息流里的帖子正文也翻');
+    const d = r.calls.filter((c) => c.vendor === 'deepl');
+    assert.strictEqual(d.length, 1, '一个响应一个请求');
+    assert.strictEqual(d[0].source, undefined, '自动识别语言');
+    console.log('ok  信息流：AdPost、adPayload、AdMetadataCell 都删掉，标题和 TitleCell 加译文，中文不翻，NSFW 不动');
+  }
+
+  // 2. 帖子页：广告位清空，评论树里的广告删掉，正文和评论的四种写法都加译文，重复的只翻一次
+  {
+    const r = await run({ body: postPage() });
+    const p = r.json.data.postInfoById;
+    assert.deepStrictEqual([p.commentsPageAds, p.commentTreeAds, p.pdpCommentsAds], [[], [], []]);
+    assert.deepStrictEqual(p.commentForest.trees.map((t) => t.node.id), ['c1', 'c2', 'c3', 'c4']);
+    const c1 = p.commentForest.trees[0].node.content;
+    assert.strictEqual(c1.markdown, 'Try a little oil on the hinge.\n\n译:Try a little oil on the hinge.');
+    assert.strictEqual(c1.preview, 'Try a little oil on the hinge.\n译:Try a little oil on the hinge.');
+    assert.strictEqual(c1.html, '<div class="md"><p>Try a little oil on the hinge.</p></div><p>译:Try a little oil on the hinge.</p>');
+    assert.deepStrictEqual(JSON.parse(c1.richtext).document[1], { e: 'par', c: [{ e: 'text', t: '译:Try a little oil on the hinge.' }] });
+    assert.strictEqual(p.commentForest.trees[1].node.content.markdown, '同意楼上');
+    assert.strictEqual(p.commentForest.trees[2].node.content.markdown, '👍👍');
+    // markdown 去掉格式和链接地址再翻
+    const texts = r.calls.filter((c) => c.vendor === 'deepl').flatMap((c) => c.texts);
+    assert.ok(texts.includes('It squeaks every time. See this video.'), JSON.stringify(texts));
+    assert.strictEqual(texts.filter((t) => t === 'Try a little oil on the hinge.').length, 1);
+    assert.strictEqual(p.title, 'How do I fix a squeaky door?\n译:How do I fix a squeaky door?');
+    console.log('ok  帖子页：三个广告位清空、评论树广告删掉，正文和评论的 markdown / preview / html / richtext 都加译文');
+  }
+
+  // 3. 缓存：同样的内容第二次不再请求
+  {
+    const r = await run({ body: postPage() });
+    const r2 = await run({ body: postPage(), store: r.store });
+    assert.strictEqual(r2.calls.length, 0);
+    assert.strictEqual(r2.json.data.postInfoById.title, 'How do I fix a squeaky door?\n译:How do I fix a squeaky door?');
+    console.log('ok  缓存：同样的内容第二次不花额度');
+  }
+
+  // 4. 翻译范围：title 只翻标题；off 只去广告
+  {
+    const r = await run({ body: postPage(), args: ARGS('&translate=title') });
+    const p = r.json.data.postInfoById;
+    assert.ok(p.title.includes('译:'));
+    assert.strictEqual(p.commentForest.trees[0].node.content.markdown, 'Try a little oil on the hinge.');
+    const r2 = await run({ body: feed(), args: ARGS('&translate=off') });
+    assert.strictEqual(r2.calls.length, 0);
+    assert.strictEqual(r2.json.data.home.elements.edges.length, 4);
+    assert.strictEqual(r2.json.data.home.elements.edges[0].node.title, 'Morning walk by the lake');
+    console.log('ok  翻译范围：title 只翻标题，off 只去广告');
+  }
+
+  // 5. DeepL 不行用 Google（一段一个请求）；都不行只去广告；DeepL 卡死按时返回去掉广告的版本
+  {
+    const r = await run({ body: feed(), behavior: 456 });
+    assert.strictEqual(r.json.data.home.elements.edges[0].node.title, 'Morning walk by the lake\n谷:Morning walk by the lake');
+    assert.ok(r.calls.filter((c) => c.vendor === 'google').every((c) => !c.q.includes('\n') || c.q.startsWith('Body')));
+    const r2 = await run({ body: feed(), behavior: 403, google: false });
+    assert.strictEqual(r2.json.data.home.elements.edges.length, 4);
+    assert.strictEqual(r2.json.data.home.elements.edges[0].node.title, 'Morning walk by the lake');
+    const r3 = await run({ body: feed(), behavior: 'hang', args: ARGS('&budget=2') });
+    assert.strictEqual(r3.json.data.home.elements.edges.length, 4, '超时也要去广告');
+    assert.ok(r3.seconds >= 3.9 && r3.seconds < 5, `应该 4 秒左右返回，实际 ${r3.seconds}`);
+    console.log(`ok  DeepL 失败用 Google，都失败只去广告，卡死时 ${r3.seconds.toFixed(1)} 秒返回去掉广告的版本`);
+  }
+
+  // 6. 没广告、不用翻译：原样放行；不是 JSON：放行
+  {
+    const r = await run({ body: { data: { user: { name: '同一个名字' } } } });
+    assert.deepStrictEqual(r.out, {});
+    console.log('ok  没有要改的就原样放行');
+  }
+
+  console.log('全部通过');
+})().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

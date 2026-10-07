@@ -1,0 +1,397 @@
+/*
+ * Reddit 去广告和翻译：处理 Reddit App 的 GraphQL 响应（gql.reddit.com、gql-fed.reddit.com）。
+ * Surge 一个响应只跑一个脚本，所以去广告和翻译放在同一个脚本里。
+ *
+ * 去广告（参考 xream 的脚本和 level3tjg/RedditFilter 的数据结构）：
+ *   - 信息流 edges 里的 AdPost、带 adPayload 的条目、带 AdMetadataCell 的 CellGroup
+ *   - 帖子详情页的 commentsPageAds、commentTreeAds、pdpCommentsAds
+ *   - 评论树里混进来的 AdPost
+ *
+ * 翻译：帖子标题、帖子正文、评论，译文接在原文下面。正文和评论的 content 里有
+ * markdown、richtext、html、preview 几种写法，App 用哪个不确定，有的都改。
+ * 已经是目标语言（中文）、纯表情的不翻。
+ *
+ * DeepL 部分照搬 youtube-subtitles.js：多个 key 按顺序用，出错按类型暂停，全部不行用
+ * Google 兜底。key 的暂停状态和 YouTube 字幕存在同一个地方，同一个 key 两边都知道它暂停了。
+ *
+ * 参数（模块里的 argument，用 & 分隔）：
+ *   keys      DeepL key，多个用 | 分隔
+ *   target    目标语言，DeepL 的写法，比如 ZH-HANS、ZH-HANT、EN-US、JA
+ *   translate all：标题、正文、评论都翻；title：只翻标题；off：只去广告
+ *   fallback  google：全部 key 失败时用 Google 翻译；off：不兜底
+ *   budget    最多等几秒翻译（默认 4），到时间没翻完的显示原文
+ *   debug     true：在 Surge 日志里打印细节
+ */
+
+var STATE_KEY = 'yt-subtitles-deepl';   // 和 YouTube 字幕共用 key 的暂停状态
+var CACHE_KEY = 'reddit-translations';
+var CACHE_SIZE = 500;                   // 缓存最近多少段译文
+var TEXTS_PER_REQUEST = 50;             // DeepL 一次最多 50 段
+var BYTES_PER_REQUEST = 100000;         // DeepL 单次请求上限 128 KiB，留点余量
+var MAX_CHARS = 3000;                   // 太长的正文只翻前面这么多字
+var PARALLEL = 3;
+var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
+var AD_LISTS = ['commentsPageAds', 'commentTreeAds', 'pdpCommentsAds'];
+
+function parseArgs(raw) {
+  var args = { keys: '', target: 'ZH-HANS', translate: 'all', fallback: 'google', budget: '4', debug: 'false' };
+  String(raw || '').split('&').forEach(function (part) {
+    var i = part.indexOf('=');
+    if (i <= 0) return;
+    var value = part.slice(i + 1);
+    try { value = decodeURIComponent(value); } catch (e) {}
+    args[part.slice(0, i).trim()] = value.replace(/^"|"$/g, '').trim();
+  });
+  args.keyList = args.keys.split(/[|;,\s]+/).filter(function (k) { return /^[\w-]+(:fx)?$/i.test(k) && k.length > 20; });
+  args.target = args.target.toUpperCase();
+  args.translate = /^(all|title|off)$/.test(args.translate) ? args.translate : 'all';
+  args.budget = Math.min(20, Math.max(1, Number(args.budget) || 4));
+  args.debug = args.debug === 'true';
+  return args;
+}
+
+var ARGS = parseArgs(typeof $argument === 'undefined' ? '' : $argument);
+var DEADLINE = Date.now() + ARGS.budget * 1000;
+
+function log() {
+  if (ARGS.debug) console.log('[Reddit] ' + Array.prototype.join.call(arguments, ' '));
+}
+
+function remaining() { return (DEADLINE - Date.now()) / 1000; }
+function now() { return Math.floor(Date.now() / 1000); }
+function isObject(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+
+// ---------- 去广告 ----------
+
+function isAd(node) {
+  if (!isObject(node)) return false;
+  if (node.__typename === 'AdPost' || isObject(node.adPayload)) return true;
+  return Array.isArray(node.cells) && node.cells.some(function (c) { return c && c.__typename === 'AdMetadataCell'; });
+}
+
+// 整个响应走一遍：edges、评论树、根上的列表里的广告删掉，几个广告位清空。返回删了几条
+function removeAds(value) {
+  var removed = 0;
+  (function walk(v) {
+    if (Array.isArray(v)) {
+      for (var i = v.length - 1; i >= 0; i--) {
+        var item = v[i];
+        if (isAd(item) || (isObject(item) && isAd(item.node))) { v.splice(i, 1); removed++; }
+        else walk(item);
+      }
+      return;
+    }
+    if (!isObject(v)) return;
+    Object.keys(v).forEach(function (k) {
+      if (AD_LISTS.indexOf(k) !== -1 && Array.isArray(v[k])) { removed += v[k].length; v[k] = []; }
+      else walk(v[k]);
+    });
+  })(value);
+  return removed;
+}
+
+// ---------- 找出要翻译的文字 ----------
+
+// 标题：SubredditPost、ProfilePost 之类的帖子，或新版信息流里的 TitleCell
+function isPost(node) { return /Post$/.test(node.__typename || '') && node.__typename !== 'AdPost'; }
+
+// markdown 转成纯文字再翻，译文不带格式符号
+function markdownText(md) {
+  return String(md)
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}(?:>+|#{1,6})\s?/gm, '')
+    .replace(/(\*\*|__|~~|>!|!<|\^|`)/g, '')
+    .replace(/(^|\s)[*_](\S[^*_]*\S|\S)[*_](?=\s|$|[.,!?])/g, '$1$2')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#x200B;/g, '')
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function contentText(content) {
+  if (typeof content.markdown === 'string') return markdownText(content.markdown);
+  if (typeof content.preview === 'string') return content.preview.trim();
+  if (typeof content.html === 'string') return content.html.replace(/<br\s*\/?>|<\/p>/gi, '\n').replace(/<[^>]+>/g, '').trim();
+  return '';
+}
+
+function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+// 译文作为新的段落接在 content 的每种写法后面
+function appendToContent(content, translation) {
+  var paragraphs = translation.split(/\n{2,}/).filter(function (p) { return p.trim(); });
+  if (typeof content.markdown === 'string') content.markdown += '\n\n' + paragraphs.join('\n\n');
+  if (typeof content.preview === 'string') content.preview += '\n' + translation;
+  if (typeof content.html === 'string') {
+    content.html += paragraphs.map(function (p) { return '<p>' + escapeHtml(p).replace(/\n/g, '<br>') + '</p>'; }).join('');
+  }
+  // richtext 是 Reddit 自己的 RTJSON：{ document: [{ e: 'par', c: [{ e: 'text', t: '…' }] }] }，有时是字符串
+  if (content.richtext) {
+    var isString = typeof content.richtext === 'string';
+    try {
+      var doc = isString ? JSON.parse(content.richtext) : content.richtext;
+      if (doc && Array.isArray(doc.document)) {
+        paragraphs.forEach(function (p) { doc.document.push({ e: 'par', c: [{ e: 'text', t: p }] }); });
+        content.richtext = isString ? JSON.stringify(doc) : doc;
+      }
+    } catch (e) {}
+  }
+}
+
+// 返回 [{ text, apply(译文) }]
+function collectJobs(value) {
+  var jobs = [];
+  var seen = [];
+  function addContent(content) {
+    if (!isObject(content) || seen.indexOf(content) !== -1) return;
+    seen.push(content);
+    var text = contentText(content);
+    if (text) jobs.push({ text: text.slice(0, MAX_CHARS), apply: function (t) { appendToContent(content, t); } });
+  }
+  (function walk(v) {
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (!isObject(v)) return;
+    if ((isPost(v) || v.__typename === 'TitleCell') && typeof v.title === 'string' && v.title.trim()) {
+      var node = v;
+      jobs.push({ text: v.title.trim(), apply: function (t) { node.title = node.title + '\n' + t; } });
+    }
+    if (ARGS.translate === 'all') {
+      if (isPost(v) || v.__typename === 'Comment') addContent(v.content);
+    }
+    Object.keys(v).forEach(function (k) { walk(v[k]); });
+  })(value);
+  return jobs;
+}
+
+// 没有文字（纯表情、链接）、本来就是目标语言的不翻。目标是中文时，汉字过半又没有假名、谚文就算中文
+function needsTranslation(text) {
+  var letters = text.replace(/https?:\/\/\S+/g, '').match(/\p{L}/gu);
+  if (!letters || letters.length < 2) return false;
+  if (/^ZH/.test(ARGS.target)) {
+    var han = (text.match(/\p{Script=Han}/gu) || []).length;
+    if (han * 2 >= letters.length && !/[぀-ヿ가-힯]/.test(text)) return false;
+  }
+  return true;
+}
+
+// ---------- 缓存 ----------
+
+function cacheKey(text) {
+  var h = 5381;
+  for (var i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) >>> 0;
+  return ARGS.target + '#' + text.length + '#' + h.toString(36);
+}
+
+function loadCache() {
+  try { return JSON.parse($persistentStore.read(CACHE_KEY) || '[]'); } catch (e) { return []; }
+}
+
+function saveCache(entries) {
+  try { $persistentStore.write(JSON.stringify(entries.slice(0, CACHE_SIZE)), CACHE_KEY); } catch (e) {}
+}
+
+// ---------- DeepL（照搬 youtube-subtitles.js） ----------
+
+// YouTube 字幕的缓存也存在这个 key 里，读写时原样保留
+function loadState() {
+  try {
+    var state = JSON.parse($persistentStore.read(STATE_KEY) || '{}');
+    state.paused = state.paused || {};
+    state.current = state.current || '';
+    return state;
+  } catch (e) {
+    return { paused: {}, current: '' };
+  }
+}
+
+function saveState(state) {
+  try { $persistentStore.write(JSON.stringify(state), STATE_KEY); } catch (e) {}
+}
+
+function fingerprint(key) {
+  var h = 5381;
+  for (var i = 0; i < key.length; i++) h = ((h << 5) + h + key.charCodeAt(i)) >>> 0;
+  return key.slice(-6) + '#' + h.toString(36);
+}
+
+function request(method, options) {
+  return new Promise(function (resolve) {
+    $httpClient[method](options, function (error, response, body) {
+      resolve({ error: error, status: response ? (response.status || response.statusCode) : 0, body: body });
+    });
+  });
+}
+
+function timeout() { return Math.max(1, Math.min(10, Math.floor(remaining()))); }
+
+function deeplOnce(key, texts) {
+  var host = /:fx$/i.test(key) ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+  return request('post', {
+    url: host + '/v2/translate',
+    headers: { Authorization: 'DeepL-Auth-Key ' + key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: texts, target_lang: ARGS.target, preserve_formatting: true }),
+    timeout: timeout(),
+  }).then(function (r) {
+    if (r.error || r.status !== 200) return { ok: false, status: r.error ? 0 : r.status };
+    try {
+      var list = JSON.parse(r.body).translations.map(function (t) { return t.text; });
+      return list.length === texts.length ? { ok: true, list: list } : { ok: false, status: 0 };
+    } catch (e) {
+      return { ok: false, status: 0 };
+    }
+  });
+}
+
+async function deepl(texts, state) {
+  var keys = ARGS.keyList.slice();
+  var start = keys.indexOf(state.current);
+  if (start > 0) keys = keys.slice(start).concat(keys.slice(0, start));
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    if (state.paused[fingerprint(key)] > now()) continue;
+    if (remaining() < 0.5) return null;
+    var r = await deeplOnce(key, texts);
+    if (r.ok) {
+      state.current = key;
+      return r.list;
+    }
+    var pause = PAUSE[r.status] || (r.status >= 500 ? PAUSE[5] : 0);
+    log('key ' + fingerprint(key) + ' 失败，状态码 ' + r.status + (pause ? '，暂停 ' + pause + ' 秒' : ''));
+    if (pause) state.paused[fingerprint(key)] = now() + pause;
+  }
+  return null;
+}
+
+async function parallel(tasks, limit, run) {
+  var next = 0;
+  async function worker() {
+    while (next < tasks.length && remaining() > 0.5) await run(tasks[next++]);
+  }
+  var workers = [];
+  for (var i = 0; i < Math.min(limit, tasks.length); i++) workers.push(worker());
+  await Promise.all(workers);
+}
+
+function googleTarget() {
+  var t = ARGS.target;
+  if (t === 'ZH' || t === 'ZH-HANS') return 'zh-CN';
+  if (t === 'ZH-HANT') return 'zh-TW';
+  return t.split('-')[0].toLowerCase();
+}
+
+// Google 一段一个请求：帖子、评论里有换行，拼在一起拆不回来
+async function google(texts, result) {
+  await parallel(texts, 4, async function (text) {
+    var r = await request('get', {
+      url: 'https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=auto&tl=' + googleTarget() + '&q=' + encodeURIComponent(text),
+      timeout: timeout(),
+    });
+    try {
+      var out = JSON.parse(r.body)[0].map(function (seg) { return seg[0]; }).join('').trim();
+      if (out) result[text] = out;
+    } catch (e) {}
+  });
+}
+
+function utf8Length(text) {
+  var n = 0;
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charCodeAt(i);
+    n += c < 0x80 ? 1 : c < 0x800 ? 2 : (c >= 0xd800 && c <= 0xdbff) ? (i++, 4) : 3;
+  }
+  return n;
+}
+
+// 一段一个 text 发给 DeepL，每段单独识别语言。返回 { 原文: 译文 }
+async function translate(texts, state) {
+  var result = {};
+  var batches = [];
+  var batch = null;
+  texts.forEach(function (t) {
+    var size = utf8Length(t) + 16;
+    if (!batch || batch.length >= TEXTS_PER_REQUEST || batch.size + size > BYTES_PER_REQUEST) {
+      batch = [];
+      batch.size = 0;
+      batches.push(batch);
+    }
+    batch.push(t);
+    batch.size += size;
+  });
+  var leftover = [];
+  var deeplDown = !ARGS.keyList.length;
+  await parallel(batches, PARALLEL, async function (b) {
+    var list = deeplDown ? null : await deepl(b, state);
+    if (!list) {
+      if (remaining() > 0.5) deeplDown = true;
+      leftover.push.apply(leftover, b);
+      return;
+    }
+    b.forEach(function (t, i) { if (list[i] && list[i].trim()) result[t] = list[i].trim(); });
+  });
+  if (leftover.length && ARGS.fallback === 'google' && remaining() > 0.5) {
+    log('DeepL 不可用，' + leftover.length + ' 段改用 Google');
+    await google(leftover, result);
+  }
+  return result;
+}
+
+// ---------- 主流程 ----------
+
+async function main() {
+  var body = $response.body;
+  if (!body || typeof body !== 'string' || !/^\s*[{[]/.test(body)) return null;
+  var json = JSON.parse(body);
+  var removed = removeAds(json);
+  if (removed) log('删掉广告 ' + removed + ' 条');
+  if (removed) adsRemoved = JSON.stringify(json);
+
+  var canTranslate = ARGS.translate !== 'off' && (ARGS.keyList.length || ARGS.fallback === 'google');
+  var jobs = canTranslate ? collectJobs(json).filter(function (j) { return needsTranslation(j.text); }) : [];
+  var translated = 0;
+  if (jobs.length) {
+    var texts = jobs.map(function (j) { return j.text; }).filter(function (t, i, all) { return all.indexOf(t) === i; });
+    var cache = loadCache();
+    var known = {};
+    cache.forEach(function (e) { known[e[0]] = e[1]; });
+    var map = {};
+    var missing = [];
+    texts.forEach(function (t) {
+      var hit = known[cacheKey(t)];
+      if (hit) map[t] = hit;
+      else missing.push(t);
+    });
+    if (missing.length) {
+      var state = loadState();
+      var fresh = await translate(missing, state);
+      saveState(state);
+      Object.keys(fresh).forEach(function (t) {
+        map[t] = fresh[t];
+        cache.unshift([cacheKey(t), fresh[t]]);
+      });
+      if (Object.keys(fresh).length) saveCache(cache);
+    }
+    jobs.forEach(function (j) {
+      var t = map[j.text];
+      if (t && t !== j.text) { j.apply(t); translated++; }
+    });
+    log('要翻 ' + texts.length + ' 段，缓存命中 ' + (texts.length - missing.length) + ' 段，用上 ' + translated + ' 处');
+  }
+  return removed || translated ? JSON.stringify(json) : null;
+}
+
+var adsRemoved = null;  // 广告删掉、还没翻译的版本，翻译超时就返回它
+var finished = false;
+function finish(out) {
+  if (finished) return;
+  finished = true;
+  $done(out ? { body: out } : {});
+}
+
+// 兜底：卡住了就返回没翻译的版本（广告照样去掉），不影响 App 加载
+setTimeout(function () { log('超时，返回没翻译的版本'); finish(adsRemoved); }, (ARGS.budget + 2) * 1000);
+
+main().then(finish, function (error) {
+  log('出错：' + (error && error.message));
+  finish(adsRemoved);
+});

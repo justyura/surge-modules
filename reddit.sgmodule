@@ -1,0 +1,14 @@
+#!name=Reddit 去广告和翻译
+#!desc=去掉 Reddit App 信息流和帖子页里的推广；帖子标题、正文、评论加上 DeepL 翻译，多个 key 自动切换
+#!category=Enhancement
+#!arguments=DeepL密钥:"填你的DeepL密钥，多个用竖线分隔",目标语言:ZH-HANS,翻译范围:all,备用翻译:google,最长等待:4,调试日志:false
+#!arguments-desc=DeepL密钥\n一个或多个 DeepL API key，用 | 分隔，按顺序使用。可以和「YouTube 双语字幕」填一样的，key 暂停的状态两边共用\n\n目标语言\nZH-HANS 简体中文，ZH-HANT 繁体中文，也可以填 EN-US、JA、KO 等\n\n翻译范围\n- all：标题、正文、评论都翻\n- title：只翻标题，省额度\n- off：不翻译，只去广告\n\n备用翻译\n- google：所有 DeepL key 都不能用时改用 Google 翻译\n- off：不兜底，显示原文\n\n最长等待\n最多等几秒翻译，到时间没翻完的显示原文。觉得刷新慢就调小\n\n调试日志\ntrue：在 Surge 日志里打印删了几条广告、翻了几段
+
+# 脚本：scripts/reddit.js（本仓库自己写的，去广告的判断参考 xream 的脚本和 level3tjg/RedditFilter）
+# Surge 一个响应只跑一个脚本，所以去广告和翻译放在同一个脚本里，不放进「App 去广告合集」
+
+[Script]
+Reddit = type=http-response,pattern=^https:\/\/gql(?:-fed)?\.reddit\.com\/,requires-body=1,max-size=5242880,timeout=30,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/reddit.js,argument="keys={{{DeepL密钥}}}&target={{{目标语言}}}&translate={{{翻译范围}}}&fallback={{{备用翻译}}}&budget={{{最长等待}}}&debug={{{调试日志}}}"
+
+[MITM]
+hostname = %APPEND% gql.reddit.com, gql-fed.reddit.com
