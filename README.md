@@ -10,7 +10,7 @@
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
-| YouTube 双语字幕 | YouTube 字幕加 DeepL 翻译，多个 key 自动切换，可以标生词 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
+| YouTube 双语字幕 | YouTube 字幕和评论加 DeepL 翻译，多个 key 自动切换，可以标生词 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
 
 ## 代理流量面板
 
@@ -232,7 +232,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sg
 https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule
 ```
 
-YouTube 字幕下面加一行 DeepL 翻译。脚本是自己写的：`scripts/youtube-subtitles.js`。
+YouTube 字幕下面加一行 DeepL 翻译，评论区的外文评论也一样。脚本是自己写的：`scripts/youtube-subtitles.js`。
 
 ### 用法
 
@@ -265,6 +265,20 @@ YouTube 字幕下面加一行 DeepL 翻译。脚本是自己写的：`scripts/yo
 - 状态里只存 key 的指纹，不存明文。
 - 打开「调试日志」可以在 Surge 日志里看到每次请求和 key 的切换。
 
+### 评论翻译
+
+打开评论区，外文评论的译文直接接在原文下面，往下翻、看回复也一样。默认开着，参数「评论翻译」填 `#` 关掉。
+
+- 一页 20 条左右，一个 DeepL 请求翻完，每条单独识别语言，英文、日文、西班牙文混着也没问题。
+- 中文评论（目标语言是中文时）和纯表情不翻，不花额度。YouTube 给关键词加的搜索链接（「词⁠关联」）不送去翻。
+- 翻过的评论缓存最近 300 条，再打开不重复花额度。
+- 最多等 4 秒（比「最长等待」小就按它），翻不完先显示原文。DeepL、Google 都不行就是原评论，不影响评论区加载。
+- 评论只能接在原文下面，「原文位置」对评论不起作用：评论里的链接、@ 都按位置标在原文上，译文放前面会错位。
+
+和「App 去广告合集」一起装没问题。评论走的是 `/youtubei/v1/next`，这个接口的响应已经被去广告脚本占了（Surge 一个响应只跑一个脚本），所以评论翻译挂在请求阶段：认出评论请求后，脚本自己带上原来的请求头（登录状态也在里面）去 YouTube 拿评论，翻译好直接返回给 App；其他 `/next` 请求原样放行，去广告照常。代价是评论请求不经过去广告脚本，评论里本来也没有广告。
+
+评论区的 App 端格式是 protobuf，字段位置是对着 iOS 客户端的真实响应找出来的。YouTube 改了格式的话，评论会原样显示，不会出错。
+
 ### 标生词
 
 接的是自己的 [vox](https://github.com/justyura/vox) 里的 `05_vocabularyService`（ECDICT 词典，`POST /v1/extract`）。在参数「生词服务」里填它的地址，比如 `http://192.168.1.2:8090`。
@@ -292,12 +306,13 @@ YouTube 字幕下面加一行 DeepL 翻译。脚本是自己写的：`scripts/yo
 | 备用翻译 | google | off 表示不用 Google 兜底 |
 | 最长等待 | 8 | 最多等几秒，到时间先显示翻好的部分 |
 | 生词服务 | 占位文字 | 自己的 vox 生词服务地址，比如 `http://192.168.1.2:8090`；不填就不标生词 |
+| 评论翻译 | 评论翻译 | 填 `#` 关掉评论翻译 |
 | 调试日志 | false | true 打印详细日志 |
 
 ### 其他
 
 - 支持 YouTube 的三种字幕格式：json3、srv3 / srv1 XML、WebVTT。自动生成字幕会把逐词的片段合成整句再翻。
-- 测试：`node tools/test_subtitles.js`，模拟 Surge 和 DeepL / Google / 生词服务接口，覆盖 key 切换、暂停、兜底、缓存、分批、三种字幕格式和标生词。
+- 测试：`node tools/test_subtitles.js`，模拟 Surge 和 DeepL / Google / 生词服务接口，覆盖 key 切换、暂停、兜底、缓存、分批、三种字幕格式、标生词和评论翻译。
 - DeepL 的条款是一人一个免费账号，多个免费账号轮着用超出额度违反条款，账号可能被封，自己把握。
 
 ## 规矩

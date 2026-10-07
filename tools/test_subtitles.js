@@ -65,6 +65,104 @@ function run({ url, body, args, behavior = {}, store = {}, google = true, latenc
   });
 }
 
+// ---------- 评论用的 protobuf ----------
+
+const varint = (n) => { const out = []; while (n >= 128) { out.push((n % 128) | 128); n = Math.floor(n / 128); } out.push(n); return out; };
+const field = (no, bytes) => Buffer.concat([Buffer.from(varint(no * 8 + 2)), Buffer.from(varint(bytes.length)), Buffer.from(bytes)]);
+const num = (no, n) => Buffer.from(varint(no * 8).concat(varint(n)));
+const COMMENTS = ['Great video, thanks!', '这个视频太棒了', '😂😂😂', 'Watch the Eclipse⁠关联 tonight', 'すごい動画です', 'Great video, thanks!'];
+
+// 仿 /next 的评论响应：frameworkUpdates(777).entityBatchUpdate(1).mutations(1).payload(3)
+// .commentEntityPayload(40).properties(2).content(3).content(1)，再夹一些别的字段。
+// 传 replaceIn 时把里面的评论正文换成 texts，用来比较「除正文外是否一样」
+function commentsPb(texts, replaceIn) {
+  if (replaceIn) {
+    const out = [];
+    let i = 0;
+    walkComments(replaceIn, () => out.push(texts[i++]));
+    return commentsPb(out);
+  }
+  const mutations = texts.map((t, i) => field(1, Buffer.concat([
+    field(1, Buffer.from('key' + i)),
+    num(2, 1),
+    field(3, field(40, Buffer.concat([
+      field(1, Buffer.from('entity' + i)),
+      field(2, Buffer.concat([field(1, Buffer.from('id' + i)), field(3, Buffer.concat([field(1, Buffer.from(t)), field(5, num(1, 17))])), num(10, 0)])),
+    ]))),
+  ])));
+  mutations.splice(2, 0, field(1, Buffer.concat([field(1, Buffer.from('toolbar')), field(3, field(41, Buffer.from('other')))])));
+  return Buffer.concat([num(1, 7), field(9, Buffer.from('continuation contents')), field(777, field(1, Buffer.concat(mutations))), num(1000, 3)]);
+}
+
+function readPb(buf) {
+  const out = [];
+  let pos = 0;
+  const rv = () => { let v = 0, s = 1, b; do { b = buf[pos++]; v += (b & 127) * s; s *= 128; } while (b & 128); return v; };
+  while (pos < buf.length) {
+    const tag = rv();
+    if (tag % 8 === 0) { out.push([Math.floor(tag / 8), rv()]); continue; }
+    const len = rv();
+    out.push([Math.floor(tag / 8), buf.subarray(pos, pos + len)]);
+    pos += len;
+  }
+  return out;
+}
+
+function walkComments(buf, visit) {
+  const get = (b, no) => readPb(Buffer.from(b)).filter((f) => f[0] === no).map((f) => f[1]);
+  for (const fu of get(buf, 777)) for (const ebu of get(fu, 1)) for (const m of get(ebu, 1)) for (const p of get(m, 3))
+    for (const c of get(p, 40)) for (const props of get(c, 2)) for (const content of get(props, 3)) for (const t of get(content, 1)) visit(Buffer.from(t).toString());
+}
+
+function commentTexts(buf) {
+  const out = [];
+  walkComments(buf, (t) => out.push(t));
+  return out;
+}
+
+// upstream: Buffer（YouTube 返回的评论）| 'network' | 状态码
+function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dzlXZ1hjUTAAeAI', headers, behavior = {}, store = {}, extra = '' }) {
+  const calls = [];
+  const started = Date.now();
+  const body = new Uint8Array(Buffer.concat([field(1, Buffer.from('context')), field(3, Buffer.from(token))]));
+  return new Promise((resolve) => {
+    const env = {
+      $argument: ARGS(K1, extra),
+      $request: {
+        url: 'https://youtubei.googleapis.com/youtubei/v1/next?id=1',
+        headers: headers || { 'Content-Type': 'application/x-protobuf', Authorization: 'Bearer token', 'Content-Length': String(body.length), 'Accept-Encoding': 'gzip' },
+        body,
+      },
+      $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
+      $httpClient: {
+        post(req, cb) {
+          if (req.url.startsWith('https://youtubei')) {
+            calls.push({ vendor: 'upstream', headers: req.headers, binary: req['binary-mode'] === true && req.body === body });
+            if (upstream === 'network') return setTimeout(() => cb('timeout', null, null));
+            const reply = typeof upstream === 'number' ? new Uint8Array(0) : new Uint8Array(upstream);
+            return setTimeout(() => cb(null, { status: typeof upstream === 'number' ? upstream : 200, headers: { 'Content-Type': 'application/x-protobuf', 'Content-Encoding': 'gzip', 'Content-Length': '1' } }, reply));
+          }
+          const key = req.headers.Authorization.replace('DeepL-Auth-Key ', '');
+          const b = JSON.parse(req.body);
+          calls.push({ vendor: 'deepl', key, n: b.text.length, xml: b.tag_handling === 'xml', source: b.source_lang });
+          const how = behavior[key] ?? 200;
+          if (how === 'hang') return;
+          if (how !== 200) return setTimeout(() => cb(null, { status: how }, '{}'));
+          setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ translations: b.text.map((t) => ({ text: '译:' + t })) })));
+        },
+        get(req, cb) {
+          const q = decodeURIComponent(/[?&]q=([^&]*)/.exec(req.url)[1]);
+          calls.push({ vendor: 'google' });
+          setTimeout(() => cb(null, { status: 200 }, JSON.stringify([[[q.split('\n').map((l) => '谷:' + l).join('\n'), q]]])));
+        },
+      },
+      $done: (out) => resolve({ out, calls, store, seconds: (Date.now() - started) / 1000 }),
+      console: { log: () => {} },
+    };
+    new Function(...Object.keys(env), CODE)(...Object.values(env));
+  });
+}
+
 const json3 = (lines) => JSON.stringify({ wireMagic: 'pb3', events: lines.map((l, i) => ({ tStartMs: i * 1000, dDurationMs: 1000, segs: [{ utf8: l }] })) });
 const events = (out) => JSON.parse(out.body).events.map((e) => e.segs.map((s) => s.utf8).join(''));
 const URL_EN = 'https://www.youtube.com/api/timedtext?v=vid1&lang=en&fmt=json3';
@@ -251,6 +349,62 @@ const deeplCalls = (r) => r.calls.filter((c) => c.vendor === 'deepl');
     const r7 = await run({ url: URL_EN, body: json3(['Hi']), args: ARGS(K1, '&vocab=不用就留着') });
     for (const x of [r6, r7]) assert.ok(!x.calls.some((c) => c.vendor === 'vocab'));
     console.log('ok  生词：只在第一次出现时标，每句最多 2 个，缓存、服务挂了不影响字幕');
+  }
+
+  // 12. 评论：认出评论请求，替 App 拿响应，翻译后接在原文下面，其他字节不动
+  {
+    const r = await runComments({ upstream: commentsPb(COMMENTS) });
+    assert.deepStrictEqual(commentTexts(r.out.response.body), [
+      'Great video, thanks!\n译:Great video, thanks!',
+      '这个视频太棒了',
+      '😂😂😂',
+      'Watch the Eclipse⁠关联 tonight\n译:Watch the Eclipse tonight',
+      'すごい動画です\n译:すごい動画です',
+      'Great video, thanks!\n译:Great video, thanks!',
+    ]);
+    const d = deeplCalls(r);
+    assert.strictEqual(d.length, 1, '一页评论一个请求');
+    assert.deepStrictEqual([d[0].n, d[0].xml, d[0].source], [3, false, undefined], '一条一段、不打包、自动识别语言、重复的只翻一次');
+    const up = r.calls.find((c) => c.vendor === 'upstream');
+    assert.strictEqual(up.headers['X-Surge-YT-Comments'], '1');
+    assert.strictEqual(up.headers.Authorization, 'Bearer token', '带上登录状态');
+    assert.ok(!('Content-Length' in up.headers) && !('Accept-Encoding' in up.headers) && up.binary);
+    assert.deepStrictEqual(r.out.response.headers, { 'Content-Type': 'application/x-protobuf' });
+    assert.strictEqual(r.out.response.status, 200);
+    // 评论正文以外的字段原样保留
+    const strip = (buf) => commentsPb(COMMENTS.map(() => 'x'), buf);
+    assert.deepStrictEqual(strip(r.out.response.body), strip(commentsPb(COMMENTS)));
+
+    // 同一条评论第二次看：走缓存不花额度
+    const r2 = await runComments({ upstream: commentsPb(COMMENTS), store: r.store });
+    assert.strictEqual(deeplCalls(r2).length, 0);
+    assert.strictEqual(commentTexts(r2.out.response.body)[0], 'Great video, thanks!\n译:Great video, thanks!');
+    console.log('ok  评论：英文、日文翻译，中文和纯表情不翻，链接标签不送去翻，其他字段不动，缓存生效');
+  }
+
+  // 13. 评论：非评论的 /next 放行；自己发出的请求放行并去掉标记；拿不到响应让 App 自己发
+  {
+    const r = await runComments({ upstream: commentsPb(COMMENTS), token: 'CBQSDRILZFF3NHc5V2dYY1EYACoA' });
+    assert.deepStrictEqual(r.out, {});
+    assert.strictEqual(r.calls.length, 0);
+    const r2 = await runComments({ upstream: commentsPb(COMMENTS), headers: { 'X-Surge-YT-Comments': '1', Accept: '*/*' } });
+    assert.deepStrictEqual(r2.out, { headers: { Accept: '*/*' } });
+    assert.strictEqual(r2.calls.length, 0);
+    const r3 = await runComments({ upstream: 'network' });
+    assert.deepStrictEqual(r3.out, {});
+    const r4 = await runComments({ upstream: 403 });
+    assert.strictEqual(r4.out.response.status, 403, '出错的响应原样交给 App，不重复请求');
+    console.log('ok  评论：其他 /next 请求、自己发的请求放行，拿不到评论时不影响 App');
+  }
+
+  // 14. 评论：DeepL 不行用 Google；DeepL 卡死时按时返回原评论
+  {
+    const r = await runComments({ upstream: commentsPb(COMMENTS), behavior: { [K1]: 403 } });
+    assert.strictEqual(commentTexts(r.out.response.body)[0], 'Great video, thanks!\n谷:Great video, thanks!');
+    const r2 = await runComments({ upstream: commentsPb(COMMENTS), behavior: { [K1]: 'hang' }, extra: '&budget=3' });
+    assert.deepStrictEqual(commentTexts(r2.out.response.body), COMMENTS);
+    assert.ok(r2.seconds >= 4.9 && r2.seconds < 6, `应该 5 秒左右返回原评论，实际 ${r2.seconds}`);
+    console.log(`ok  评论：DeepL 失败用 Google，卡死时 ${r2.seconds.toFixed(1)} 秒返回原评论`);
   }
 
   console.log('全部通过');
