@@ -74,22 +74,26 @@ const COMMENTS = ['Great video, thanks!', '这个视频太棒了', '😂😂😂
 
 // 仿 /next 的评论响应：frameworkUpdates(777).entityBatchUpdate(1).mutations(1).payload(3)
 // .commentEntityPayload(40).properties(2).content(3).content(1)，再夹一些别的字段。
+// 每条评论还带一个 commentSurfaceEntityPayload(79)，里面 inlineReadMoreButton(10).isExpanded(2) 是「展开」状态。
 // 传 replaceIn 时把里面的评论正文换成 texts，用来比较「除正文外是否一样」
-function commentsPb(texts, replaceIn) {
+function commentsPb(texts, replaceIn, expanded = 0) {
   if (replaceIn) {
     const out = [];
     let i = 0;
     walkComments(replaceIn, () => out.push(texts[i++]));
-    return commentsPb(out);
+    return commentsPb(out, null, expanded);
   }
-  const mutations = texts.map((t, i) => field(1, Buffer.concat([
+  const mutations = texts.flatMap((t, i) => [field(1, Buffer.concat([
     field(1, Buffer.from('key' + i)),
     num(2, 1),
     field(3, field(40, Buffer.concat([
       field(1, Buffer.from('entity' + i)),
       field(2, Buffer.concat([field(1, Buffer.from('id' + i)), field(3, Buffer.concat([field(1, Buffer.from(t)), field(5, num(1, 17))])), num(10, 0)])),
     ]))),
-  ])));
+  ])), field(1, Buffer.concat([
+    field(1, Buffer.from('surface' + i)),
+    field(3, field(79, Buffer.concat([field(1, Buffer.from('surface' + i)), field(4, Buffer.from('3 replies')), field(10, num(2, expanded)), num(21, 1)]))),
+  ]))]);
   mutations.splice(2, 0, field(1, Buffer.concat([field(1, Buffer.from('toolbar')), field(3, field(41, Buffer.from('other')))])));
   return Buffer.concat([num(1, 7), field(9, Buffer.from('continuation contents')), field(777, field(1, Buffer.concat(mutations))), num(1000, 3)]);
 }
@@ -114,6 +118,14 @@ function walkComments(buf, visit) {
     for (const c of get(p, 40)) for (const props of get(c, 2)) for (const content of get(props, 3)) for (const t of get(content, 1)) visit(Buffer.from(t).toString());
 }
 
+function expandStates(buf) {
+  const get = (b, no) => readPb(Buffer.from(b)).filter((f) => f[0] === no).map((f) => f[1]);
+  const out = [];
+  for (const fu of get(buf, 777)) for (const ebu of get(fu, 1)) for (const m of get(ebu, 1)) for (const p of get(m, 3))
+    for (const c of get(p, 79)) for (const b of get(c, 10)) out.push(get(b, 2)[0]);
+  return out;
+}
+
 function commentTexts(buf) {
   const out = [];
   walkComments(buf, (t) => out.push(t));
@@ -121,13 +133,13 @@ function commentTexts(buf) {
 }
 
 // upstream: Buffer（YouTube 返回的评论）| 'network' | 状态码
-function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dzlXZ1hjUTAAeAI', headers, behavior = {}, store = {}, extra = '' }) {
+function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dzlXZ1hjUTAAeAI', browseId, headers, behavior = {}, store = {}, extra = '', keys = K1 }) {
   const calls = [];
   const started = Date.now();
-  const body = new Uint8Array(Buffer.concat([field(1, Buffer.from('context')), field(3, Buffer.from(token))]));
+  const body = new Uint8Array(Buffer.concat([field(1, Buffer.from('context')), browseId ? field(2, Buffer.from(browseId)) : field(3, Buffer.from(token))]));
   return new Promise((resolve) => {
     const env = {
-      $argument: ARGS(K1, extra),
+      $argument: ARGS(keys, extra),
       $request: {
         url: 'https://youtubei.googleapis.com/youtubei/v1/next?id=1',
         headers: headers || { 'Content-Type': 'application/x-protobuf', Authorization: 'Bearer token', 'Content-Length': String(body.length), 'Accept-Encoding': 'gzip' },
@@ -371,8 +383,9 @@ const deeplCalls = (r) => r.calls.filter((c) => c.vendor === 'deepl');
     assert.ok(!('Content-Length' in up.headers) && !('Accept-Encoding' in up.headers) && up.binary);
     assert.deepStrictEqual(r.out.response.headers, { 'Content-Type': 'application/x-protobuf' });
     assert.strictEqual(r.out.response.status, 200);
-    // 评论正文以外的字段原样保留
-    const strip = (buf) => commentsPb(COMMENTS.map(() => 'x'), buf);
+    // 评论正文以外的字段原样保留，只有「展开」状态改成 true
+    assert.deepStrictEqual(expandStates(r.out.response.body), Array(COMMENTS.length).fill(1));
+    const strip = (buf) => commentsPb(COMMENTS.map(() => 'x'), buf, 1);
     assert.deepStrictEqual(strip(r.out.response.body), strip(commentsPb(COMMENTS)));
 
     // 同一条评论第二次看：走缓存不花额度
@@ -405,6 +418,34 @@ const deeplCalls = (r) => r.calls.filter((c) => c.vendor === 'deepl');
     assert.deepStrictEqual(commentTexts(r2.out.response.body), COMMENTS);
     assert.ok(r2.seconds >= 4.9 && r2.seconds < 6, `应该 5 秒左右返回原评论，实际 ${r2.seconds}`);
     console.log(`ok  评论：DeepL 失败用 Google，卡死时 ${r2.seconds.toFixed(1)} 秒返回原评论`);
+  }
+
+  // 15. 回复（/browse）：打开回复、往下翻回复都认得出；首页等其他 browse 放行
+  {
+    const r = await runComments({ upstream: commentsPb(COMMENTS), browseId: 'FEcomment_watch_replies_panel' });
+    assert.strictEqual(commentTexts(r.out.response.body)[0], 'Great video, thanks!\n译:Great video, thanks!');
+    for (const token of ['4qmFsgKFARIdRkVjb21tZW50X3dhdGNoX3JlcGxpZXNfcGFuZWw', Buffer.from('\0FEcomment_watch_replies_panel').toString('base64url'), Buffer.from('\0\0FEcomment_watch_replies_panel').toString('base64url')]) {
+      const r2 = await runComments({ upstream: commentsPb(COMMENTS), token });
+      assert.ok(r2.out.response, '没认出回复的 token：' + token);
+    }
+    const r3 = await runComments({ upstream: commentsPb(COMMENTS), browseId: 'FEwhat_to_watch' });
+    assert.deepStrictEqual(r3.out, {});
+    assert.strictEqual(r3.calls.length, 0);
+    console.log('ok  回复：打开回复、往下翻回复都翻译，首页等其他 browse 请求放行');
+  }
+
+  // 16. 展开：expand=false 保持原样；没有 key 也不用 Google 时只展开
+  {
+    const r = await runComments({ upstream: commentsPb(COMMENTS), extra: '&expand=false' });
+    assert.deepStrictEqual(expandStates(r.out.response.body), Array(COMMENTS.length).fill(0));
+    const r2 = await runComments({ upstream: commentsPb(COMMENTS), keys: '', extra: '&fallback=off' });
+    assert.deepStrictEqual(expandStates(r2.out.response.body), Array(COMMENTS.length).fill(1));
+    assert.deepStrictEqual(commentTexts(r2.out.response.body), COMMENTS);
+    assert.ok(!r2.calls.some((c) => c.vendor !== 'upstream'));
+    const r3 = await runComments({ upstream: commentsPb(COMMENTS), keys: '', extra: '&fallback=off&expand=false' });
+    assert.deepStrictEqual(r3.out, {});
+    assert.strictEqual(r3.calls.length, 0);
+    console.log('ok  展开：默认展开全文，可以关掉；不翻译时也能单独展开');
   }
 
   console.log('全部通过');

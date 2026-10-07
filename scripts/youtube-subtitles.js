@@ -18,13 +18,14 @@
  *   budget    最多等几秒（默认 8）。到时间就先返回翻好的部分，没翻完的显示原文；
  *             翻好的会缓存，重新打开字幕会接着翻剩下的
  *   debug     true：在 Surge 日志里打印每次请求的细节
+ *   expand    评论直接展开全文，不用点「展开」（默认 true）
  *   vocab     生词服务地址（vox 的 05_vocabularyService，比如 http://192.168.1.2:8090）。
  *             英文字幕会整段发过去，生词第一次出现的那句下面标上中文释义。不填就不标
  *
- * 同一个脚本也翻译 App 里的评论：作为 http-request 脚本挂在 /youtubei/v1/next 上。
- * 这个接口的响应已经被「App 去广告合集」的脚本占了（Surge 一个响应只跑一个脚本），
- * 所以在请求阶段认出评论请求，自己去 YouTube 拿评论、翻译好直接当响应返回；
- * 其他 /next 请求原样放行。key、暂停状态、Google 兜底都和字幕共用。
+ * 同一个脚本也翻译 App 里的评论：作为 http-request 脚本挂在 /youtubei/v1/next 和 /browse 上
+ * （评论区走 next，点进某条评论看回复走 browse）。这两个接口的响应已经被「App 去广告合集」
+ * 的脚本占了（Surge 一个响应只跑一个脚本），所以在请求阶段认出评论请求，自己去 YouTube
+ * 拿评论、翻译好直接当响应返回；其他请求原样放行。key、暂停状态、Google 兜底都和字幕共用。
  */
 
 var STORE_KEY = 'yt-subtitles-deepl';
@@ -45,7 +46,7 @@ var COMMENT_MARK = 'X-Surge-YT-Comments';  // 自己发出的请求带这个头�
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
 
 function parseArgs(raw) {
-  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false', vocab: '' };
+  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false', vocab: '', expand: 'true' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -57,6 +58,7 @@ function parseArgs(raw) {
   args.target = args.target.toUpperCase();
   args.budget = Math.min(50, Math.max(3, Number(args.budget) || 8));
   args.debug = args.debug === 'true';
+  args.expand = args.expand !== 'false';
   args.vocab = /^https?:\/\/[^\s"]+$/i.test(args.vocab) ? args.vocab.replace(/\/+$/, '') : '';
   return args;
 }
@@ -459,6 +461,8 @@ function param(url, name) {
 // → commentEntityPayload(40) → properties(2) → content(3) → content(1)。
 // 链接、加粗之类的范围（commandRuns / styleRuns）从开头算，译文接在末尾不影响它们
 var COMMENT_TEXT_PATH = [777, 1, 1, 3, 40, 2, 3, 1];
+// 「展开」按钮的状态：commentSurfaceEntityPayload(79) → inlineReadMoreButton(10) → isExpanded(2)
+var COMMENT_EXPAND_PATH = [777, 1, 1, 3, 79, 10];
 
 function readVarint(bytes, pos) {
   var value = 0;
@@ -525,13 +529,25 @@ function pbRewrite(bytes, path, edit) {
   return out;
 }
 
-// 评论的 continuation token 解开是 12 0d 12 0b <视频 ID> 18 06 …，base64 就是 Eg0SC…GAY。
-// 打开评论区、往下翻、看回复都是这种 token；推荐视频翻页等其他 /next 请求不是
+// 评论区（/next）：continuation token 解开是 12 0d 12 0b <视频 ID> 18 06 …，base64 就是 Eg0SC…GAY，
+// 打开评论区、往下翻都是这种 token；推荐视频翻页等其他 /next 请求不是。
+// 回复（/browse）：browseId 是 FEcomment_watch_replies_panel，往下翻回复时它在 base64 的
+// continuation token 里，按三种对齐方式分别是 RkVjb21tZW50、ZFY29tbWVu、GRWNvbW1lbnRf
 function isCommentsRequest(body) {
   if (!body || !body.length) return false;
   var text = '';
   for (var i = 0; i < body.length; i += 8192) text += String.fromCharCode.apply(null, body.subarray(i, i + 8192));
-  return /Eg0SC[\w-]{15}GAY/.test(text);
+  return /Eg0SC[\w-]{15}GAY|FEcomment_|RkVjb21tZW50|ZFY29tbWVu|GRWNvbW1lbnRf/.test(text);
+}
+
+// isExpanded 设成 true，其他字段不动
+function expandButton(bytes) {
+  var fields = pbFields(bytes);
+  if (!fields) return null;
+  var parts = [];
+  fields.forEach(function (f) { if (f.field !== 2) parts.push.apply(parts, Array.prototype.slice.call(bytes.subarray(f.start, f.end))); });
+  parts.push(0x10, 0x01);
+  return new Uint8Array(parts);
 }
 
 // YouTube 在评论里给关键词加的搜索链接，显示成「词⁠关联」，翻译前去掉后面的标签
@@ -628,7 +644,8 @@ async function commentsMain() {
     return { headers: clean };
   }
   if (!(($request.body || {}) instanceof Uint8Array) || !isCommentsRequest($request.body)) return null;
-  if (!ARGS.keyList.length && ARGS.fallback !== 'google') { log('没有可用的 DeepL key'); return null; }
+  var canTranslate = ARGS.keyList.length || ARGS.fallback === 'google';
+  if (!canTranslate && !ARGS.expand) { log('没有可用的 DeepL key'); return null; }
 
   var upstream = await fetchUpstream();
   if (!upstream) return null;  // 没拿到就让 App 自己的请求照常发出去
@@ -637,8 +654,21 @@ async function commentsMain() {
   var body = upstream.body;
   if (upstream.status !== 200 || !(body instanceof Uint8Array)) return commentFallback;
 
+  var map = canTranslate ? await translateCommentTexts(body) : {};
+  var patched = Object.keys(map).length ? pbRewrite(body, COMMENT_TEXT_PATH, function (bytes) {
+    var text = new TextDecoder().decode(bytes);
+    var translation = map[text];
+    return translation ? new TextEncoder().encode(text + '\n' + translation) : null;
+  }) : null;
+  body = patched || body;
+  if (ARGS.expand) body = pbRewrite(body, COMMENT_EXPAND_PATH, expandButton) || body;
+  response.body = body;
+  return commentFallback;
+}
+
+// 找出要翻的评论去翻译，返回 { 评论原文: 译文 }
+async function translateCommentTexts(body) {
   var decoder = new TextDecoder();
-  var encoder = new TextEncoder();
   var originals = [];
   pbRewrite(body, COMMENT_TEXT_PATH, function (bytes) { originals.push(decoder.decode(bytes)); return null; });
   var sources = {};
@@ -649,7 +679,7 @@ async function commentsMain() {
   var todo = Object.keys(sources).map(function (t) { return sources[t]; })
     .filter(function (t, i, all) { return all.indexOf(t) === i; });
   log('评论 ' + originals.length + ' 条，要翻 ' + todo.length + ' 条');
-  if (!todo.length) return commentFallback;
+  if (!todo.length) return {};
 
   DEADLINE = Date.now() + Math.min(ARGS.budget, COMMENT_BUDGET) * 1000;
   arm(Math.min(ARGS.budget, COMMENT_BUDGET) + 2);
@@ -675,14 +705,12 @@ async function commentsMain() {
   }
   log('缓存命中 ' + (todo.length - missing.length) + ' 条，翻好 ' + Object.keys(map).length + ' / ' + todo.length + ' 条');
 
-  var patched = pbRewrite(body, COMMENT_TEXT_PATH, function (bytes) {
-    var text = decoder.decode(bytes);
+  var result = {};
+  Object.keys(sources).forEach(function (text) {
     var translation = map[sources[text]];
-    if (!translation || translation === sources[text]) return null;
-    return encoder.encode(text + '\n' + translation);
+    if (translation && translation !== sources[text]) result[text] = translation;
   });
-  if (patched) response.body = patched;
-  return commentFallback;
+  return result;
 }
 
 // ---------- 主流程 ----------
