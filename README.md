@@ -15,6 +15,7 @@
 | Reddit 去广告和翻译 | Reddit App 的推广帖去掉，标题、正文、评论加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule` |
 | Stack Overflow 翻译 | 第三方 Stack Overflow App（Octostack 等）里的标题、问题、回答、评论按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule` |
 | Stack Overflow 网页翻译 | Safari 里看 Stack Overflow 和其他 Stack Exchange 站点，同样按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow-web.sgmodule` |
+| GitHub 翻译 | GitHub 官方 App 里 Issue、PR、评论、README 按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/github.sgmodule` |
 
 ## 代理流量面板
 
@@ -492,6 +493,50 @@ DeepL key 只在 Surge 里用，网页拿不到。在 Safari 里打开 `https://
 - Stack Overflow 前面有 Cloudflare。开了 MITM 以后如果一直卡在「Verify you are human」，先关掉这个模块试试。
 - 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
 - 测试：`node tools/test_stackoverflow_web.js`，要装 Playwright。后面加一个存下来的问题页 HTML 文件，可以看真实页面能翻多少段。
+
+## GitHub 翻译
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/github.sgmodule
+```
+
+给 GitHub 官方 App 用的。App 通过 `api.github.com` 拿数据，脚本直接改返回的 JSON，要开 MITM。脚本是自己写的：`scripts/github.js`。
+
+### 翻译
+
+- Issue、PR、讨论：标题的译文接在下一行，正文和评论按段对照，一段原文下面紧跟它的译文。
+- Release 说明、仓库简介、README 也翻。
+- 列表每项单独翻，代码块和表格不翻，行内代码原样保留。中文段落不翻，夹着英文名字的中文（比如「AdGuard Home 面板」）也算中文。
+- 一个响应最多翻 400 段，最多等 5 秒（参数「最长等待」），没翻完的显示原文。退出再点进去，翻过的走缓存，会接着翻后面的。缓存最近 800 段。
+- DeepL key 可以和其他几个翻译模块填一样的，哪个 key 被暂停几个模块共用。
+
+### 编辑时不会带上译文
+
+App 编辑评论时用的是 markdown 原文（`body`），不是用来显示的 HTML（`bodyHTML`）。脚本只改 HTML，所以在 App 里编辑评论，编辑框里是原文，不会把译文存进去。
+
+标题没有单独的显示用字段，翻了的话改标题时编辑框里会带着译文。所以自己能编辑的 Issue、PR（自己开的，或者自己有权限的仓库里的），标题不翻。
+
+参数「改markdown」打开后，别人的 markdown 原文也会插译文。只有装好后发现标题有译文、正文没有（说明 App 用 markdown 显示）时才需要打开。
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
+| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
+| 翻译范围 | all | all 全翻；title 只翻标题和仓库简介；off 不翻 |
+| 改markdown | false | true 时 markdown 原文也插译文 |
+| 备用翻译 | google | off 表示不用 Google 兜底 |
+| 最长等待 | 5 | 最多等几秒翻译 |
+| 调试日志 | false | true 打印每个响应的地址、字段和翻了几段 |
+
+### 需要知道的
+
+- GitHub App 具体请求哪些字段没有抓包核对过，是按 GitHub 公开的接口字段写的：GraphQL 里以 `HTML` 结尾的字段（`bodyHTML`、`descriptionHTML`、`titleHTML`）、REST 里的 `body_html`，加上 README 的两种格式（HTML 和 base64 的 markdown）。HTML 照着 GitHub 真实渲染出来的写法测过。
+- 哪里没翻：打开「调试日志」，在 App 里点开那个页面，看 Surge 日志里 `[GitHub]` 开头的行。每个响应一行，写着地址、有哪些类型、有哪些 HTML 字段，把这几行发过来就知道 App 用的是什么。
+- MITM 了 `api.github.com` 以后，其他用 GitHub 接口的 App 拿到的 Issue、README 也会带译文。
+- 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
+- 测试：`node tools/test_github.js`。
 
 ## 规矩
 

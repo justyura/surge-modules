@@ -1,40 +1,40 @@
 /*
- * Stack Overflow App 翻译：处理第三方客户端（比如 Octostack）用的 Stack Exchange 官方接口
- * api.stackexchange.com 的响应，问题标题、问题、回答、评论加上 DeepL 译文。
+ * GitHub 翻译：处理 GitHub 官方 App 用的 api.github.com（GraphQL 和 REST）的响应，
+ * Issue、PR、讨论的标题、正文、评论，Release 说明，仓库简介和 README 加上 DeepL 译文。
  *
- * 接口返回 { items: [...] }，问题、回答、评论都带 question_id / answer_id / comment_id：
- *   - title：标题，HTML 转义过的纯文字，译文接在下一行
- *   - body：HTML。正文按段插，一段（p、h1-h6、li）原文后面紧跟它的译文；评论的 body
- *     没有段落标签，译文用 <br> 接在后面
- *   - body_markdown：markdown（也是 HTML 转义过的），空行分段，同样一段原文一段译文
- * App 用 body 还是 body_markdown 显示不确定，有的都改。代码块不翻，行内代码原样保留。
+ * 只改用来显示的 HTML：GraphQL 里的 bodyHTML、descriptionHTML 这类以 HTML 结尾的字段，REST 里的
+ * body_html。正文按段插，一段（p、h1-h6、li）原文后面紧跟它的译文，代码块、表格不翻，行内代码原样保留。
+ * markdown 原文（body）默认不动：App 编辑评论时用的是它，改了的话编辑框里会带着译文，一保存就发出去了。
+ * 标题：自己能编辑的（viewerCanUpdate 为 true）不翻，同样是怕改标题时把译文存进去。
+ * README：/repos/…/readme 返回 HTML 时按段插；返回 base64 的 markdown 时解开按段插再编回去。
  *
- * DeepL 部分照搬 reddit.js：多个 key 按顺序用，出错按类型暂停，全部不行用 Google 兜底。
- * key 的暂停状态和 YouTube 字幕、Reddit 存在同一个地方。
+ * DeepL 部分照搬 stackoverflow.js：多个 key 按顺序用，出错按类型暂停，全部不行用 Google 兜底。
+ * key 的暂停状态和 YouTube 字幕、Reddit、Stack Overflow 存在同一个地方。
  *
  * 参数（模块里的 argument，用 & 分隔）：
  *   keys      DeepL key，多个用 | 分隔
  *   target    目标语言，DeepL 的写法，比如 ZH-HANS、ZH-HANT、EN-US、JA
- *   translate all：标题、正文、评论；post：不翻评论；title：只翻标题；off：不翻
+ *   translate all：标题、正文、评论、README；title：只翻标题和简介；off：不翻
+ *   markdown  true：markdown 原文（body）也插译文。App 只显示原文、不显示译文时再打开，打开后别在 App 里编辑评论
  *   fallback  google：全部 key 失败时用 Google 翻译；off：不兜底
- *   answers   一个响应里最多翻几个回答（默认 10，0 不限）。热门问题一次返回上百个回答，全翻很费额度
  *   budget    最多等几秒翻译（默认 5），到时间没翻完的显示原文
- *   debug     true：在 Surge 日志里打印细节
+ *   debug     true：在 Surge 日志里打印每个响应的地址、字段和翻了几段
  */
 
-var STATE_KEY = 'yt-subtitles-deepl';   // 和 YouTube 字幕、Reddit、Stack Overflow 网页翻译共用 key 的暂停状态
-var CACHE_KEY = 'stackoverflow-translations';
+var STATE_KEY = 'yt-subtitles-deepl';   // 和 YouTube 字幕、Reddit、Stack Overflow 共用 key 的暂停状态
+var CACHE_KEY = 'github-translations';
 var CACHE_SIZE = 800;                   // 缓存最近多少段译文
 var TEXTS_PER_REQUEST = 50;             // DeepL 一次最多 50 段
 var BYTES_PER_REQUEST = 100000;         // DeepL 单次请求上限 128 KiB，留点余量
 var MAX_CHARS = 5000;                   // 再长的一段不翻
+var MAX_TEXTS = 400;                    // 一个响应最多翻多少段，长 README、几百条评论的 Issue 不一次翻完
 var GOOGLE_CHARS = 1500;                // Google 兜底一个请求最多拼多少字（放在网址里，不能太长）
-var PARALLEL = 6;                       // 同时发几个请求：回答多的问题拆成几份一起翻，不排队
+var PARALLEL = 6;                       // 同时发几个请求：评论多的 Issue 拆成几份一起翻，不排队
 var MIN_BYTES_PER_REQUEST = 2000;       // 内容少时不拆得太碎
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
 
 function parseArgs(raw) {
-  var args = { keys: '', target: 'ZH-HANS', translate: 'all', fallback: 'google', answers: '10', budget: '5', debug: 'false' };
+  var args = { keys: '', target: 'ZH-HANS', translate: 'all', markdown: 'false', fallback: 'google', budget: '5', debug: 'false' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -44,8 +44,8 @@ function parseArgs(raw) {
   });
   args.keyList = args.keys.split(/[|;,\s]+/).filter(function (k) { return /^[\w-]+(:fx)?$/i.test(k) && k.length > 20; });
   args.target = args.target.toUpperCase();
-  args.translate = /^(all|post|title|off)$/.test(args.translate) ? args.translate : 'all';
-  args.answers = /^\d+$/.test(args.answers) ? Number(args.answers) : 10;
+  args.translate = /^(all|title|off)$/.test(args.translate) ? args.translate : 'all';
+  args.markdown = args.markdown === 'true';
   args.budget = Math.min(20, Math.max(1, Number(args.budget) || 5));
   args.debug = args.debug === 'true';
   return args;
@@ -55,7 +55,7 @@ var ARGS = parseArgs(typeof $argument === 'undefined' ? '' : $argument);
 var DEADLINE = Date.now() + ARGS.budget * 1000;
 
 function log() {
-  if (ARGS.debug) console.log('[StackOverflow] ' + Array.prototype.join.call(arguments, ' '));
+  if (ARGS.debug) console.log('[GitHub] ' + Array.prototype.join.call(arguments, ' '));
 }
 
 function remaining() { return (DEADLINE - Date.now()) / 1000; }
@@ -165,27 +165,32 @@ function interleaveHtml(html, paragraphs, lookup) {
   return { html: out, count: count };
 }
 
-// markdown 的一行行内文字转成发给 DeepL 的写法：`代码` 变 <code>，链接只留文字，去掉强调符号。
-// body_markdown 本来就是 HTML 转义过的，文字原样用
+// ---------- markdown（GitHub 的 markdown 是原文，没有转义过） ----------
+
+// 一段 markdown 转成发给 DeepL 的写法：`代码` 变 <code>，链接只留文字，去掉强调符号和 HTML 标签，文字转义
 function markdownInline(md) {
   var codes = [];
-  var text = md.replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, function (m, ticks, code) { codes.push(code.trim()); return '\u0000' + (codes.length - 1) + '\u0000'; })
+  var text = md.replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, function (m, ticks, code) { codes.push(code.trim()); return '\u0000' + (codes.length - 1) + '\u0000'; })
     .replace(/!\[[^\]]*\]\([^)]*\)|!\[[^\]]*\]\[[^\]]*\]/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]*)\]\[[^\]]*\]/g, '$1')
-    .replace(/&lt;(https?:[^&]*)&gt;/g, '$1')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/^\s*\[[ xX]\]\s+/, '')
+    .replace(/<(https?:[^>]*)>/g, '$1')
+    .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
     .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '$2')
     .replace(/(^|[\s(])[*_](?=\S)([^*_]*?\S)[*_](?=[\s).,!?:;]|$)/g, '$1$2')
-    .replace(/ {2,}\n/g, '<br>');
-  text = text.replace(/\u0000(\d+)\u0000/g, function (m, i) { return '<code>' + codes[i] + '</code>'; });
+    .replace(/~~(?=\S)([\s\S]*?\S)~~/g, '$1')
+    .replace(/ {2,}\n/g, '\u0001');
+  text = escapeHtml(text).replace(/\u0001/g, '<br>');
+  text = text.replace(/\u0000(\d+)\u0000/g, function (m, i) { return '<code>' + escapeHtml(codes[i]) + '</code>'; });
   return squash(text);
 }
 
-// 译文转回 markdown：<code> 变回 `代码`，<br> 变成行尾两个空格的换行
+// 译文转回 markdown：<code> 变回 `代码`，<br> 变成行尾两个空格的换行，实体转回文字
 function toMarkdown(t) {
-  return cleanTranslation(t).replace(/<code>([\s\S]*?)<\/code>/g, function (m, c) { return /`/.test(c) ? '`` ' + c + ' ``' : '`' + c + '`'; })
-    .replace(/<br>/g, '  \n');
+  return cleanTranslation(t).replace(/<code>([\s\S]*?)<\/code>/g, function (m, c) { c = plainText(c); return /`/.test(c) ? '`` ' + c + ' ``' : '`' + c + '`'; })
+    .split('<br>').map(plainText).join('  \n');
 }
 
 var LIST_ITEM = /^(\s{0,3})([-*+]|\d+[.)])\s+/;
@@ -198,7 +203,13 @@ function markdownBlocks(lines) {
   lines.forEach(function (line) {
     if (fence) {
       block.lines.push(line);
-      if (new RegExp('^\\s*' + fence + '\\s*$').test(line)) { fence = null; block = null; }
+      if (new RegExp(fence === '.*-->' ? '-->' : '^\\s*' + fence + '\\s*$').test(line)) { fence = null; block = null; }
+      return;
+    }
+    if (/^\s{0,3}<!--/.test(line) && !/-->/.test(line)) {
+      fence = '.*-->';
+      block = { lines: [line], code: true };
+      blocks.push(block);
       return;
     }
     var f = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
@@ -220,7 +231,7 @@ function markdownUnits(block) {
   var lines = block.lines;
   if (block.code || block.blank) return [];
   if (lines.every(function (l) { return /^( {4}|\t)/.test(l); })) return [];                 // 缩进代码块
-  if (lines.every(function (l) { return /^\s*(\[[^\]]+\]:\s*\S+|<!--.*-->|&lt;!--.*--&gt;|([-*_]\s*){3,}|\|.*)\s*$/.test(l); })) return [];
+  if (lines.every(function (l) { return /^\s*(\[[^\]]+\]:\s*\S+|<!--.*-->|([-*_]\s*){3,}|\|.*|(<\/?[a-zA-Z][^>]*>\s*)+)\s*$/.test(l); })) return [];
   var units = [];
   var unit = null;
   lines.forEach(function (line, i) {
@@ -272,88 +283,162 @@ function interleaveMarkdown(md, lookup) {
   return { markdown: out.join(eol).replace(/\r?\n/g, eol), count: count };
 }
 
-// 评论这种没有段落标签的 body：整段一段，译文用 <br> 接在后面
 function inlineHtml(html) { return /<(p|h[1-6]|ul|ol|pre|blockquote|table|div)\b/i.test(html) ? null : squash(html.replace(/<(?!\/?code\b)[^>]*>/gi, ' ')); }
 
 // ---------- 找出要翻译的文字 ----------
 
-function isPost(node) {
-  return ['question_id', 'answer_id', 'comment_id'].some(function (k) { return k in node; });
+// 显示用的 HTML 字段：GraphQL 的 bodyHTML、descriptionHTML 等，REST 的 body_html
+function isHtmlKey(key) { return /HTML$|_html$/.test(key); }
+
+// 有标题的东西：Issue、PR、讨论、Release（GraphQL 看 __typename，REST 看网址）
+function hasTitle(node) {
+  if (/^(Issue|PullRequest|Discussion|Release)$/.test(node.__typename || '')) return true;
+  return typeof node.html_url === 'string' && /\/(issues|pull|discussions|releases\/tag)\//.test(node.html_url);
 }
 
-// 返回 [{ texts: 要翻的段落, apply(lookup) → 用上了几段 }]。
-// 回答按 App 给的顺序数，超过 ARGS.answers 个的回答和它下面的评论不翻，标题照翻
-function collectJobs(value) {
+function isRepository(node) { return node.__typename === 'Repository' || typeof node.full_name === 'string' && 'stargazers_count' in node; }
+
+// 返回 [{ texts: 要翻的段落, apply(lookup) → 用上了几段 }]
+function collectJobs(value, stats) {
   var jobs = [];
-  var answers = 0;
-  (function walk(v, skipped) {
-    if (Array.isArray(v)) { v.forEach(function (x) { walk(x, skipped); }); return; }
+  (function walk(v) {
+    if (Array.isArray(v)) { v.forEach(walk); return; }
     if (!isObject(v)) return;
-    if (isPost(v)) {
-      var comment = 'comment_id' in v;
-      if (!comment && 'answer_id' in v && ARGS.answers && ++answers > ARGS.answers) skipped = true;
-      if (typeof v.title === 'string' && v.title.trim() && !comment) jobs.push(titleJob(v));
-      var wantBody = !skipped && (ARGS.translate === 'all' || (ARGS.translate === 'post' && !comment));
-      if (wantBody && typeof v.body === 'string' && v.body) jobs.push(htmlJob(v));
-      if (wantBody && typeof v.body_markdown === 'string' && v.body_markdown) jobs.push(markdownJob(v, comment));
+    if (typeof v.title === 'string' && v.title.trim() && hasTitle(v) && v.viewerCanUpdate !== true) jobs.push(lineJob(v, 'title'));
+    if (isRepository(v) && typeof v.description === 'string' && v.description.trim()) jobs.push(lineJob(v, 'description'));
+    if (ARGS.translate === 'all') {
+      Object.keys(v).forEach(function (k) {
+        if (typeof v[k] !== 'string' || !v[k] || !isHtmlKey(k)) return;
+        if (isRepository(v) && /^(short)?descriptionHTML$/i.test(k)) return;   // 仓库简介上面翻过了
+        stats[k] = (stats[k] || 0) + 1;
+        jobs.push(htmlJob(v, k));
+      });
+      if (ARGS.markdown && typeof v.body === 'string' && v.body && v.viewerCanUpdate !== true) jobs.push(markdownJob(v, 'body'));
     }
-    Object.keys(v).forEach(function (k) { if (k !== 'owner' && k !== 'reply_to_user') walk(v[k], skipped); });
-  })(value, false);
-  if (answers > ARGS.answers && ARGS.answers) log('回答有 ' + answers + ' 个，只翻前 ' + ARGS.answers + ' 个');
+    Object.keys(v).forEach(function (k) { if (k !== 'author' && k !== 'user' && k !== 'owner') walk(v[k]); });
+  })(value);
   return jobs.filter(Boolean);
 }
 
-function titleJob(node) {
-  var title = node.title.trim();
-  return { texts: [title], apply: function (lookup) {
-    var t = lookup(title);
+function lineJob(node, key) {
+  var text = squash(escapeHtml(node[key]));
+  return { texts: [text], apply: function (lookup) {
+    var t = lookup(text);
     if (!t) return 0;
-    node.title = node.title + '\n' + cleanTranslation(t).replace(/<\/?code>/g, '').replace(/<br>/g, ' ');
+    node[key] = node[key] + '\n' + plainText(cleanTranslation(t).replace(/<br>/g, ' '));
     return 1;
   } };
 }
 
-function htmlJob(node) {
-  var inline = inlineHtml(node.body);
+function htmlJob(node, key) {
+  var inline = inlineHtml(node[key]);
   if (inline !== null) {
     if (!inline) return null;
     return { texts: [inline], apply: function (lookup) {
       var t = lookup(inline);
       if (!t) return 0;
-      node.body = node.body + '<br>' + cleanTranslation(t);
+      node[key] = node[key] + '<br>' + cleanTranslation(t);
       return 1;
     } };
   }
-  var paragraphs = htmlParagraphs(node.body);
+  var paragraphs = htmlParagraphs(node[key]);
   if (!paragraphs.length) return null;
   return { texts: paragraphs.map(function (p) { return p.text; }), apply: function (lookup) {
-    var r = interleaveHtml(node.body, paragraphs, lookup);
-    node.body = r.html;
+    var r = interleaveHtml(node[key], paragraphs, lookup);
+    node[key] = r.html;
     return r.count;
   } };
 }
 
-function markdownJob(node, comment) {
-  if (comment) {
-    var text = markdownInline(node.body_markdown);
-    if (!text) return null;
-    return { texts: [text], apply: function (lookup) {
-      var t = lookup(text);
-      if (!t) return 0;
-      node.body_markdown = node.body_markdown + '\n\n' + toMarkdown(t);
-      return 1;
-    } };
-  }
-  var units = markdownParagraphs(node.body_markdown);
+function markdownJob(node, key) {
+  var units = markdownParagraphs(node[key]);
   if (!units.length) return null;
   return { texts: units.map(function (u) { return u.text; }), apply: function (lookup) {
-    var r = interleaveMarkdown(node.body_markdown, lookup);
-    node.body_markdown = r.markdown;
+    var r = interleaveMarkdown(node[key], lookup);
+    node[key] = r.markdown;
     return r.count;
   } };
 }
 
-// 没有文字（纯代码、链接）、本来就是目标语言的不翻。目标是中文时，汉字不比英文单词少、又没有假名和谚文就算中文
+// 整个是 HTML 的响应（README 用 html 格式拿的时候）
+function documentJob(holder) {
+  var paragraphs = htmlParagraphs(holder.html);
+  if (!paragraphs.length) return [];
+  return [{ texts: paragraphs.map(function (p) { return p.text; }), apply: function (lookup) {
+    var r = interleaveHtml(holder.html, paragraphs, lookup);
+    holder.html = r.html;
+    return r.count;
+  } }];
+}
+
+// ---------- base64（README 的 content），先转 UTF-8 ----------
+
+var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function fromBase64(text) {
+  var clean = text.replace(/[^A-Za-z0-9+/]/g, '');
+  var bytes = [];
+  for (var i = 0; i < clean.length; i += 4) {
+    var n = B64.indexOf(clean[i]) << 18 | B64.indexOf(clean[i + 1]) << 12 | (B64.indexOf(clean[i + 2]) & 63) << 6 | B64.indexOf(clean[i + 3]) & 63;
+    bytes.push(n >> 16 & 255);
+    if (i + 2 < clean.length) bytes.push(n >> 8 & 255);
+    if (i + 3 < clean.length) bytes.push(n & 255);
+  }
+  var out = '';
+  for (var j = 0; j < bytes.length; j++) {
+    var b = bytes[j];
+    var c = b < 0x80 ? b
+      : b < 0xe0 ? (b & 31) << 6 | bytes[++j] & 63
+      : b < 0xf0 ? (b & 15) << 12 | (bytes[++j] & 63) << 6 | bytes[++j] & 63
+      : (b & 7) << 18 | (bytes[++j] & 63) << 12 | (bytes[++j] & 63) << 6 | bytes[++j] & 63;
+    out += String.fromCodePoint(c);
+  }
+  return out;
+}
+
+function toBase64(text) {
+  var bytes = [];
+  for (var i = 0; i < text.length; i++) {
+    var c = text.codePointAt(i);
+    if (c > 0xffff) i++;
+    if (c < 0x80) bytes.push(c);
+    else if (c < 0x800) bytes.push(0xc0 | c >> 6, 0x80 | c & 63);
+    else if (c < 0x10000) bytes.push(0xe0 | c >> 12, 0x80 | c >> 6 & 63, 0x80 | c & 63);
+    else bytes.push(0xf0 | c >> 18, 0x80 | c >> 12 & 63, 0x80 | c >> 6 & 63, 0x80 | c & 63);
+  }
+  var out = '';
+  for (var j = 0; j < bytes.length; j += 3) {
+    var n = bytes[j] << 16 | (bytes[j + 1] || 0) << 8 | (bytes[j + 2] || 0);
+    out += B64[n >> 18 & 63] + B64[n >> 12 & 63] + (j + 1 < bytes.length ? B64[n >> 6 & 63] : '=') + (j + 2 < bytes.length ? B64[n & 63] : '=');
+  }
+  return out;
+}
+
+// README 的 JSON：{ name: 'README.md', encoding: 'base64', content: '…' }。只处理 markdown 文件
+function readmeJob(node) {
+  if (node.encoding !== 'base64' || typeof node.content !== 'string' || !/\.(md|markdown|mdown)$/i.test(node.name || node.path || '')) return [];
+  var holder = { markdown: fromBase64(node.content) };
+  var units = markdownParagraphs(holder.markdown);
+  if (!units.length) return [];
+  return [{ texts: units.map(function (u) { return u.text; }), apply: function (lookup) {
+    var r = interleaveMarkdown(holder.markdown, lookup);
+    if (r.count) node.content = toBase64(r.markdown);
+    return r.count;
+  } }];
+}
+
+// 调试用：响应里有哪些 __typename、各几个
+function typenames(value) {
+  var counts = {};
+  (function walk(v) {
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (!isObject(v)) return;
+    if (v.__typename) counts[v.__typename] = (counts[v.__typename] || 0) + 1;
+    Object.keys(v).forEach(function (k) { walk(v[k]); });
+  })(value);
+  return Object.keys(counts).map(function (k) { return k + '×' + counts[k]; }).join(' ');
+}
+
 function needsTranslation(html) {
   var text = html.replace(/<code>[\s\S]*?<\/code>/g, ' ').replace(/<[^>]+>/g, ' ').replace(/&[#\w]+;/g, ' ');
   var letters = text.replace(/https?:\/\/\S+/g, '').match(/\p{L}/gu);
@@ -383,7 +468,7 @@ function saveCache(entries) {
   try { $persistentStore.write(JSON.stringify(entries.slice(0, CACHE_SIZE)), CACHE_KEY); } catch (e) {}
 }
 
-// ---------- DeepL（照搬 reddit.js，多了 tag_handling：行内代码不翻） ----------
+// ---------- DeepL（照搬 stackoverflow.js） ----------
 
 // YouTube 字幕的缓存也存在这个 key 里，读写时原样保留
 function loadState() {
@@ -574,21 +659,43 @@ async function translate(texts, state) {
 
 // ---------- 主流程 ----------
 
+function header(name) {
+  var headers = $response.headers || {};
+  for (var key in headers) if (key.toLowerCase() === name) return String(headers[key]);
+  return '';
+}
+
 async function main() {
   var body = $response.body;
-  if (ARGS.translate === 'off' || !body || typeof body !== 'string' || !/^\s*\{/.test(body)) return null;
-  var json = JSON.parse(body);
-  if (!Array.isArray(json.items)) return null;
-  if (ARGS.debug) log($request.url.replace(/\?.*/, ''), json.items.length + ' 条');
+  if (ARGS.translate === 'off' || !body || typeof body !== 'string') return null;
+  var url = $request.url.replace(/\?.*/, '');
+  var jobs = [];
+  var json = null;
+  var doc = null;
+  var stats = {};
+  if (/^\s*[{[]/.test(body)) {
+    json = JSON.parse(body);
+    if (ARGS.translate === 'all' && /\/readme(\/[^/]*)?$/.test(url) && isObject(json)) jobs = readmeJob(json);
+    else jobs = collectJobs(json, stats);
+    if (ARGS.debug) {
+      var root = isObject(json) && isObject(json.data) ? 'data.' + Object.keys(json.data).join(',') : Array.isArray(json) ? 'array×' + json.length : Object.keys(json).slice(0, 6).join(',');
+      log(url, root, typenames(json).slice(0, 200), Object.keys(stats).map(function (k) { return k + '×' + stats[k]; }).join(' '));
+    }
+  } else if (ARGS.translate === 'all' && /html/i.test(header('content-type')) && /\/readme(\/[^/]*)?$/.test(url)) {
+    doc = { html: body };
+    jobs = documentJob(doc);
+    log(url, 'README HTML');
+  }
+  if (!jobs.length) return null;
 
   var canTranslate = ARGS.keyList.length || ARGS.fallback === 'google';
-  var jobs = canTranslate ? collectJobs(json.items) : [];
+  if (!canTranslate) return null;
   var texts = [];
   var seen = {};
   jobs.forEach(function (j) {
     j.texts.forEach(function (t) {
       var k = norm(t);
-      if (!k || seen[k] || t.length > MAX_CHARS || !needsTranslation(t)) return;
+      if (!k || seen[k] || texts.length >= MAX_TEXTS || t.length > MAX_CHARS || !needsTranslation(t)) return;
       seen[k] = true;
       texts.push(t);
     });
@@ -614,7 +721,7 @@ async function main() {
     });
     if (Object.keys(fresh).length) saveCache(cache);
   }
-  // 同一段在 body 和 body_markdown 里写法不一样，按去掉格式后的文字对上
+  // 同一段在 HTML 和 markdown 里写法不一样，按去掉格式后的文字对上
   var byNorm = {};
   texts.forEach(function (t) { if (map[t] && norm(map[t]) !== norm(t)) byNorm[norm(t)] = map[t]; });   // 译出来和原文一样的（人名、产品名）不插
   var lookup = function (text) { var k = norm(text); return k ? byNorm[k] : undefined; };
@@ -623,7 +730,8 @@ async function main() {
   var left = texts.filter(function (t) { return !map[t]; }).length;
   log('要翻 ' + texts.length + ' 段，缓存命中 ' + (texts.length - missing.length) + ' 段，用上 ' + translated + ' 处'
     + (left ? '，' + left + ' 段没翻完（超时或出错），重新打开会接着翻' : ''));
-  return translated ? JSON.stringify(json) : null;
+  if (!translated) return null;
+  return doc ? doc.html : JSON.stringify(json);
 }
 
 var finished = false;

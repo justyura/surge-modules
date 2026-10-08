@@ -1,0 +1,16 @@
+#!name=GitHub 翻译
+#!desc=GitHub 官方 App 里 Issue、PR、讨论的标题、正文、评论，Release 说明，仓库简介和 README 按段加上 DeepL 翻译，多个 key 自动切换
+#!category=Enhancement
+#!arguments=DeepL密钥:"填你的DeepL密钥，多个用竖线分隔",目标语言:ZH-HANS,翻译范围:all,改markdown:false,备用翻译:google,最长等待:5,调试日志:false
+#!arguments-desc=DeepL密钥\n一个或多个 DeepL API key，用 | 分隔，按顺序使用。可以和「YouTube 双语字幕」「Reddit 去广告和翻译」「Stack Overflow 翻译」填一样的，key 暂停的状态几个模块共用\n\n目标语言\nZH-HANS 简体中文，ZH-HANT 繁体中文，也可以填 EN-US、JA、KO 等\n\n翻译范围\n- all：标题、正文、评论、README 都翻\n- title：只翻标题和仓库简介，省额度\n- off：不翻译\n\n改markdown\n默认 false：只改 App 用来显示的 HTML，不动 markdown 原文，在 App 里编辑评论不会带上译文。\ntrue：markdown 原文也插译文。只有装好后标题有译文、正文和评论没有时才打开，打开后别在 App 里编辑别人能看到的内容\n\n备用翻译\n- google：所有 DeepL key 都不能用时改用 Google 翻译\n- off：不兜底，显示原文\n\n最长等待\n最多等几秒翻译，到时间没翻完的显示原文。觉得打开页面慢就调小\n\n调试日志\ntrue：在 Surge 日志里打印每个响应的地址、有哪些类型和字段、翻了几段
+
+# 脚本：scripts/github.js（本仓库自己写的）
+# GitHub App 通过 api.github.com 拿数据（GraphQL 为主，也有 REST），脚本直接改返回的 JSON。
+# 只改用来显示的 HTML 字段（bodyHTML、body_html 这类），markdown 原文默认不动；自己能编辑的标题也不翻，
+# 这样在 App 里编辑时编辑框里不会带着译文
+
+[Script]
+GitHub 翻译 = type=http-response,pattern=^https:\/\/api\.github\.com\/(?:graphql|repos\/|search\/issues),requires-body=1,max-size=3145728,timeout=30,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/github.js,argument="keys={{{DeepL密钥}}}&target={{{目标语言}}}&translate={{{翻译范围}}}&markdown={{{改markdown}}}&fallback={{{备用翻译}}}&budget={{{最长等待}}}&debug={{{调试日志}}}"
+
+[MITM]
+hostname = %APPEND% api.github.com
