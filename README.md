@@ -7,6 +7,7 @@
 | 模块 | 作用 | 安装链接 |
 | --- | --- | --- |
 | 代理流量面板 | 在面板里显示剩余流量、已用比例、到期日期和重置时间 | `https://raw.githubusercontent.com/justyura/surge-modules/main/usage-pane.sgmodule` |
+| AdGuard Home 面板 | 在面板里显示自建 AdGuard Home 的防护状态、24 小时查询和拦截数，可以点一下暂停 / 恢复防护 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adguard-home.sgmodule` |
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
@@ -65,6 +66,49 @@
 - 绿色：用了不到 75%
 - 橙色：75% 到 90%
 - 红色：90% 以上，或者请求失败
+
+## AdGuard Home 面板
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/adguard-home.sgmodule
+```
+
+在 Surge 首页显示自建 AdGuard Home 的情况，用的是 AdGuard Home 自己的接口（`/control/status`、`/control/stats`、`/control/protection`），不用 MITM。脚本是自己写的：`scripts/adguard-home.js`。
+
+面板上有：
+
+- 标题：防护中 / 已暂停（还剩几分钟）/ 防护已关闭
+- 过去 24 小时的查询数、拦截数和拦截比例
+- 平均响应时间
+- 拦截最多的两个域名
+- AdGuard Home 版本
+
+每 30 分钟自动刷新一次。
+
+### 安装
+
+1. Surge → 模块 → 安装新模块，粘贴上面的链接。
+2. 在模块参数里填 `地址`（网页后台的地址，比如 `https://adguard.example.com`）、`用户名`、`密码`。
+3. 想点一下就暂停防护，把 `点击` 改成 `pause`。一次暂停几分钟看 `暂停分钟`，到时间 AdGuard Home 自己恢复，暂停中再点一下马上恢复。
+
+地址和账号只保存在本机的 Surge 配置里，不会进仓库。
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| 地址 | 占位文字 | AdGuard Home 网页后台的地址，不带 `/control` |
+| 用户名 | 占位文字 | 网页后台的登录用户名 |
+| 密码 | 占位文字 | 登录密码，不能有英文双引号 |
+| 点击 | refresh | refresh 点面板刷新；pause 点面板暂停 / 恢复防护 |
+| 暂停分钟 | 10 | 一次暂停几分钟，0 表示一直关着直到再点 |
+
+### 需要知道的
+
+- 面板显示「用户名或密码不对」：账号填错了。AdGuard Home 登录失败次数太多会暂时封锁，这时显示 403，等一会儿再试。
+- AdGuard Home 的统计周期设得比 24 小时短时，显示的是整个统计周期的数字。
+- 0.107.27 以前的老版本没有暂停功能，点一下是直接关掉防护，再点打开。
+- 测试：`node tools/test_adguard_home.js`。
 
 ## App 去广告合集
 
