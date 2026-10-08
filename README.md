@@ -12,6 +12,7 @@
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
 | YouTube 双语字幕 | YouTube 字幕和评论加 DeepL 翻译，多个 key 自动切换，可以标生词 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
 | Reddit 去广告和翻译 | Reddit App 的推广帖去掉，标题、正文、评论加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule` |
+| Stack Overflow 翻译 | Safari 里看 Stack Overflow 和其他 Stack Exchange 站点，标题、问题、回答、评论按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule` |
 
 ## 代理流量面板
 
@@ -361,6 +362,53 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
 - 不按类型名挑：GraphQL 里任何带正文的 `content`、REST 里的 `body`、`selftext` 都会翻，Reddit 改了类型名也照样能翻。
 - 打开「调试日志」后，每个响应都会打一行：接口地址、`data` 下面的字段名、有哪些 `__typename`。某个页面没翻译，把这几行发出来就能看出是哪个接口。
 - 测试：`node tools/test_reddit.js`。
+
+## Stack Overflow 翻译
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule
+```
+
+Stack Exchange 官方 App 已经下架了，iPhone 上用 Safari 看。在 Safari 里打开 stackoverflow.com，点分享 →「添加到主屏幕」，主屏幕上就多一个全屏打开的 Stack Overflow，用起来跟 App 一样，翻译照样有。要开 MITM。脚本是自己写的：`scripts/stackoverflow.js`。
+
+也管 Super User、Server Fault、Ask Ubuntu、MathOverflow、各个 `*.stackexchange.com` 站和它们的 meta 站，以及 ru、pt、es、ja 这些语言版的 Stack Overflow。
+
+### 翻译
+
+- 问题页：标题、问题、每个回答、评论。正文按段对照，一段原文下面紧跟它的译文，列表每项单独翻。
+- 列表页、搜索结果：只翻标题。
+- 代码块不翻，行内代码（`<code>`）原样保留在译文里。中文段落、纯代码不翻。
+- 只翻快滚到屏幕里的段落，长帖子往下滑才翻后面的，不会一打开就把整页的额度用掉。点「显示更多评论」后加载出来的评论也会翻。
+- 右下角的橙色「译」按钮：点一下隐藏译文，再点显示，会记住。
+- 翻过的在 Surge 里缓存最近 800 段，再打开同一页不花额度。
+- DeepL key 可以和「YouTube 双语字幕」「Reddit 去广告和翻译」填一样的，哪个 key 被暂停几个模块共用。
+
+### 怎么做的
+
+两个脚本，用的是同一个文件：
+
+1. 打开问题页时，往网页里插一段脚本。
+2. 网页脚本把要翻的段落发给同一个网站的 `/__surge-translate`。
+3. Surge 拦下这个请求，自己去调 DeepL，把译文直接返回给网页，请求不会发到 Stack Overflow。
+
+DeepL key 只在 Surge 里用，网页拿不到。在 Safari 里打开 `https://stackoverflow.com/__surge-translate`，能看到模块是不是在工作、DeepL 能不能用。
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
+| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
+| 翻译范围 | all | all 全翻；post 不翻评论；title 只翻标题；off 不翻 |
+| 备用翻译 | google | off 表示不用 Google 兜底 |
+| 调试日志 | false | true 打印每次翻了几段、key 的切换 |
+
+### 需要知道的
+
+- 页面结构是照着现在的 Stack Overflow 问题页写的，新版评论（Svelte 渲染）和旧版评论都认。拿存下来的真实页面跑过，没有在真机上试过。哪里没翻，打开「调试日志」看 Surge 日志里 `[StackOverflow]` 开头的几行。
+- Stack Overflow 前面有 Cloudflare。开了 MITM 以后如果一直卡在「Verify you are human」，先关掉这个模块试试。
+- 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
+- 测试：`node tools/test_stackoverflow.js`，要装 Playwright。后面加一个存下来的问题页 HTML 文件，可以看真实页面能翻多少段。
 
 ## 规矩
 
