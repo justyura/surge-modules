@@ -12,7 +12,8 @@
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
 | YouTube 双语字幕 | YouTube 字幕和评论加 DeepL 翻译，多个 key 自动切换，可以标生词 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
 | Reddit 去广告和翻译 | Reddit App 的推广帖去掉，标题、正文、评论加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule` |
-| Stack Overflow 翻译 | Safari 里看 Stack Overflow 和其他 Stack Exchange 站点，标题、问题、回答、评论按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule` |
+| Stack Overflow 翻译 | 第三方 Stack Overflow App（Octostack 等）里的标题、问题、回答、评论按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule` |
+| Stack Overflow 网页翻译 | Safari 里看 Stack Overflow 和其他 Stack Exchange 站点，同样按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow-web.sgmodule` |
 
 ## 代理流量面板
 
@@ -369,7 +370,45 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
 https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule
 ```
 
-Stack Exchange 官方 App 已经下架了，iPhone 上用 Safari 看。在 Safari 里打开 stackoverflow.com，点分享 →「添加到主屏幕」，主屏幕上就多一个全屏打开的 Stack Overflow，用起来跟 App 一样，翻译照样有。要开 MITM。脚本是自己写的：`scripts/stackoverflow.js`。
+Stack Overflow 官方 App 已经下架了，这个模块给第三方客户端用，在 [Octostack](https://apps.apple.com/us/app/-/id6443491836)（App Store 里叫「Stack Overflow Client」）上用。第三方客户端都通过 Stack Exchange 的官方接口 `api.stackexchange.com` 拿数据，脚本直接改接口返回的 JSON，要开 MITM。脚本是自己写的：`scripts/stackoverflow.js`。
+
+### 翻译
+
+- 问题列表、搜索结果：标题的译文接在下一行。
+- 问题页：标题、问题、回答、评论。正文按段对照，一段原文下面紧跟它的译文。列表每项单独翻，译文接在这一项里面；引用里的译文还在引用里。
+- 代码块不翻，行内代码原样保留在译文里。中文段落、纯代码不翻。
+- 接口里正文有 HTML（`body`）和 markdown（`body_markdown`）两种写法，App 用哪个不确定，两种都按段插了译文。同一段两边只翻一次。
+- 热门问题一次返回上百个回答，全翻一个问题就要好几万字。默认只翻前 10 个回答和它们的评论（参数「最多回答」），按 App 里的顺序数，一般就是票数最高的 10 个。标题照翻。
+- 最多等 5 秒（参数「最长等待」），没翻完的显示原文。退出问题再点进去，翻过的走缓存，会接着翻后面的。缓存最近 800 段。
+- DeepL key 可以和「YouTube 双语字幕」「Reddit 去广告和翻译」填一样的，哪个 key 被暂停几个模块共用。
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
+| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
+| 翻译范围 | all | all 全翻；post 不翻评论；title 只翻标题；off 不翻 |
+| 最多回答 | 10 | 一次最多翻几个回答，0 不限 |
+| 备用翻译 | google | off 表示不用 Google 兜底 |
+| 最长等待 | 5 | 最多等几秒翻译 |
+| 调试日志 | false | true 打印每个响应翻了几段、key 的切换 |
+
+### 需要知道的
+
+- 数据格式是照着 `api.stackexchange.com` 真实返回的数据写的，拿热门问题的真实响应跑过：译文去掉以后原文一个字没变。还没有在 Octostack 上试过。
+- 装好后没有翻译：打开「调试日志」，在 Octostack 里点开一个问题，看 Surge 日志里有没有 `[StackOverflow]` 开头的行。没有的话，到「最近请求」里看 App 的请求发到了哪个域名，把域名发过来。
+- 开了 MITM 以后 App 加载不出来，说明 App 不接受 MITM 证书，这种情况脚本没办法。
+- 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
+- 测试：`node tools/test_stackoverflow.js`。后面加一个存下来的接口响应 JSON 文件，可以看真实数据能翻多少段。
+
+## Stack Overflow 网页翻译
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow-web.sgmodule
+```
+
+给 Safari 用的。用 App 看的话装上面的「Stack Overflow 翻译」，两个模块互不影响，可以只装一个。在 Safari 里打开 stackoverflow.com，点分享 →「添加到主屏幕」，主屏幕上就多一个全屏打开的 Stack Overflow。要开 MITM。脚本是自己写的：`scripts/stackoverflow-web.js`。
 
 也管 Super User、Server Fault、Ask Ubuntu、MathOverflow、各个 `*.stackexchange.com` 站和它们的 meta 站，以及 ru、pt、es、ja 这些语言版的 Stack Overflow。
 
@@ -381,7 +420,7 @@ Stack Exchange 官方 App 已经下架了，iPhone 上用 Safari 看。在 Safar
 - 只翻快滚到屏幕里的段落，长帖子往下滑才翻后面的，不会一打开就把整页的额度用掉。点「显示更多评论」后加载出来的评论也会翻。
 - 右下角的橙色「译」按钮：点一下隐藏译文，再点显示，会记住。
 - 翻过的在 Surge 里缓存最近 800 段，再打开同一页不花额度。
-- DeepL key 可以和「YouTube 双语字幕」「Reddit 去广告和翻译」填一样的，哪个 key 被暂停几个模块共用。
+- DeepL key 可以和「YouTube 双语字幕」「Reddit 去广告和翻译」「Stack Overflow 翻译」填一样的，哪个 key 被暂停几个模块共用。
 
 ### 怎么做的
 
@@ -405,10 +444,10 @@ DeepL key 只在 Surge 里用，网页拿不到。在 Safari 里打开 `https://
 
 ### 需要知道的
 
-- 页面结构是照着现在的 Stack Overflow 问题页写的，新版评论（Svelte 渲染）和旧版评论都认。拿存下来的真实页面跑过，没有在真机上试过。哪里没翻，打开「调试日志」看 Surge 日志里 `[StackOverflow]` 开头的几行。
+- 页面结构是照着现在的 Stack Overflow 问题页写的，新版评论（Svelte 渲染）和旧版评论都认。拿存下来的真实页面跑过，没有在真机上试过。哪里没翻，打开「调试日志」看 Surge 日志里 `[StackOverflow 网页]` 开头的几行。
 - Stack Overflow 前面有 Cloudflare。开了 MITM 以后如果一直卡在「Verify you are human」，先关掉这个模块试试。
 - 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
-- 测试：`node tools/test_stackoverflow.js`，要装 Playwright。后面加一个存下来的问题页 HTML 文件，可以看真实页面能翻多少段。
+- 测试：`node tools/test_stackoverflow_web.js`，要装 Playwright。后面加一个存下来的问题页 HTML 文件，可以看真实页面能翻多少段。
 
 ## 规矩
 

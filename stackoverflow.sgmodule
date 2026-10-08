@@ -1,16 +1,15 @@
 #!name=Stack Overflow 翻译
-#!desc=在 Safari 里看 Stack Overflow 和其他 Stack Exchange 站点时，标题、问题、回答、评论按段加上 DeepL 翻译，多个 key 自动切换
+#!desc=第三方 Stack Overflow App（比如 Octostack）里的问题标题、问题、回答、评论按段加上 DeepL 翻译，多个 key 自动切换
 #!category=Enhancement
-#!arguments=DeepL密钥:"填你的DeepL密钥，多个用竖线分隔",目标语言:ZH-HANS,翻译范围:all,备用翻译:google,调试日志:false
-#!arguments-desc=DeepL密钥\n一个或多个 DeepL API key，用 | 分隔，按顺序使用。可以和「YouTube 双语字幕」「Reddit 去广告和翻译」填一样的，key 暂停的状态几个模块共用\n\n目标语言\nZH-HANS 简体中文，ZH-HANT 繁体中文，也可以填 EN-US、JA、KO 等\n\n翻译范围\n- all：标题、问题、回答、评论都翻\n- post：不翻评论，省额度\n- title：只翻标题\n- off：不翻译\n\n备用翻译\n- google：所有 DeepL key 都不能用时改用 Google 翻译\n- off：不兜底，显示原文\n\n调试日志\ntrue：在 Surge 日志里打印每次翻了几段、key 的切换情况
+#!arguments=DeepL密钥:"填你的DeepL密钥，多个用竖线分隔",目标语言:ZH-HANS,翻译范围:all,最多回答:10,备用翻译:google,最长等待:5,调试日志:false
+#!arguments-desc=DeepL密钥\n一个或多个 DeepL API key，用 | 分隔，按顺序使用。可以和「YouTube 双语字幕」「Reddit 去广告和翻译」填一样的，key 暂停的状态几个模块共用\n\n目标语言\nZH-HANS 简体中文，ZH-HANT 繁体中文，也可以填 EN-US、JA、KO 等\n\n翻译范围\n- all：标题、问题、回答、评论都翻\n- post：不翻评论，省额度\n- title：只翻标题\n- off：不翻译\n\n最多回答\n一次最多翻几个回答，按 App 里的顺序数，后面的回答和它下面的评论不翻。热门问题有上百个回答，全翻很费额度。填 0 不限\n\n备用翻译\n- google：所有 DeepL key 都不能用时改用 Google 翻译\n- off：不兜底，显示原文\n\n最长等待\n最多等几秒翻译，到时间没翻完的显示原文。觉得打开问题慢就调小\n\n调试日志\ntrue：在 Surge 日志里打印每个响应翻了几段、key 的切换情况
 
 # 脚本：scripts/stackoverflow.js（本仓库自己写的）
-# 第一个脚本往网页里插一段脚本；网页脚本把快滚到屏幕里的段落发给同站的 /__surge-translate，
-# 第二个脚本在 Surge 里拦下这个请求、调 DeepL、直接返回译文。DeepL key 不会进网页
+# 第三方客户端都是通过 Stack Exchange 官方接口 api.stackexchange.com 拿数据，脚本直接改接口返回的 JSON。
+# 不处理站点列表、过滤器、标签这些和帖子无关的接口。Safari 里看网页用「Stack Overflow 网页翻译」
 
 [Script]
-Stack Overflow 翻译 = type=http-response,pattern=^https:\/\/(?:(?:[a-z]{2}\.|meta\.)?stackoverflow\.com|(?:meta\.)?(?:superuser\.com|serverfault\.com|askubuntu\.com|mathoverflow\.net)|(?!api\.|chat\.)[a-z0-9-]+(?:\.meta)?\.stackexchange\.com)\/(?:questions(?:[\/?]|$)|search\?|unanswered|\?|$),requires-body=1,max-size=4194304,timeout=10,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/stackoverflow.js,argument="translate={{{翻译范围}}}&debug={{{调试日志}}}"
-Stack Overflow 翻译接口 = type=http-request,pattern=^https:\/\/(?:(?:[a-z]{2}\.|meta\.)?stackoverflow\.com|(?:meta\.)?(?:superuser\.com|serverfault\.com|askubuntu\.com|mathoverflow\.net)|(?!api\.|chat\.)[a-z0-9-]+(?:\.meta)?\.stackexchange\.com)\/__surge-translate(?:\?.*)?$,requires-body=1,max-size=262144,timeout=30,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/stackoverflow.js,argument="keys={{{DeepL密钥}}}&target={{{目标语言}}}&translate={{{翻译范围}}}&fallback={{{备用翻译}}}&debug={{{调试日志}}}"
+Stack Overflow 翻译 = type=http-response,pattern=^https:\/\/api\.stackexchange\.com\/2\.\d+\/(?!(?:sites|filters|info|access-tokens|apps|errors|privileges)(?:[\/?]|$)|(?:tags|badges)(?:\?|$)),requires-body=1,max-size=5242880,timeout=30,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/stackoverflow.js,argument="keys={{{DeepL密钥}}}&target={{{目标语言}}}&translate={{{翻译范围}}}&answers={{{最多回答}}}&fallback={{{备用翻译}}}&budget={{{最长等待}}}&debug={{{调试日志}}}"
 
 [MITM]
-hostname = %APPEND% stackoverflow.com, *.stackoverflow.com, superuser.com, *.superuser.com, serverfault.com, *.serverfault.com, askubuntu.com, *.askubuntu.com, mathoverflow.net, *.mathoverflow.net, *.stackexchange.com
+hostname = %APPEND% api.stackexchange.com
