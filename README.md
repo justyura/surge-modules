@@ -16,6 +16,7 @@
 | Stack Overflow 翻译 | 第三方 Stack Overflow App（Octostack 等）里的标题、问题、回答、评论按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule` |
 | Stack Overflow 网页翻译 | Safari 里看 Stack Overflow 和其他 Stack Exchange 站点，同样按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow-web.sgmodule` |
 | GitHub 翻译 | GitHub 官方 App 里 Issue、PR、评论、README 按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/github.sgmodule` |
+| X 去广告和屏蔽中文 | Safari 里的 x.com，时间线、推文详情、搜索、趋势里的推广和中文推文删掉 | `https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule` |
 
 ## 代理流量面板
 
@@ -127,7 +128,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 | YouTube | 首页、搜索、播放页、Shorts 里的广告，片头和中途插播广告；YouTube Music 也管。另外默认隐藏 Shorts、小游戏、竖屏直播，打开视频自动开字幕 |
 | 抖音 | 只能拦广告投放和素材域名，信息流广告去不掉 |
 | 小红书 | 开屏、首页和关注页信息流、搜索页、详情页 |
-| Twitter / X | 只能拦广告和统计域名，时间线里的推广帖目前没有可用规则 |
+| Twitter / X | 只能拦广告和统计域名，时间线里的推广帖目前没有可用规则。网页版用「X 去广告和屏蔽中文」 |
 | 微博 | 开屏、信息流、热搜、发现页、超话、详情页、评论区，含轻享版 |
 | 知乎 | 开屏、首页推荐、热榜、回答页、评论区、搜索页、会员页 |
 | 微信 | 只能去公众号文章底部广告和商品推广 |
@@ -537,6 +538,46 @@ App 编辑评论时用的是 markdown 原文（`body`），不是用来显示的
 - MITM 了 `api.github.com` 以后，其他用 GitHub 接口的 App 拿到的 Issue、README 也会带译文。
 - 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
 - 测试：`node tools/test_github.js`。
+
+## X 去广告和屏蔽中文
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule
+```
+
+给 Safari 里的 x.com 用的，处理网页版的 GraphQL 接口（`x.com/i/api/graphql/…`），推广和中文推文在接口里就删掉，页面上不会闪一下再消失。要开 MITM。脚本是自己写的：`scripts/x.js`。
+
+### 去广告
+
+- 「为你推荐」「正在关注」、列表、搜索里的推广帖
+- 推文详情页回复里插的推广
+- 推荐关注里的推广账号、趋势里的推广趋势
+
+### 屏蔽中文
+
+- 推文正文是中文的删掉：X 自己标的语言是中文，或者正文里汉字比英文单词多（至少 4 个汉字）。长推文看展开后的全文，转推看被转的那条。
+- 带假名、谚文的算日文、韩文，不删；X 标成日文、韩文的也不删。
+- 趋势名字是中文的删掉。
+- 对话串里的中文回复删掉，英文的留着；整串都是中文就整串删。
+- `中文判定` 改成 `strict` 会删得更狠：引用了中文推文、作者名字或简介里有汉字的推文也删（专治名字是中文、发英文的机器人），推荐关注里名字带汉字的账号也删。纯汉字的日文名字会被误伤。
+- 这些地方不删：自己点开的那条推文和它上面的串、个人主页、用中文搜索的结果、白名单里的账号。
+
+### 参数
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| 屏蔽中文 | true | false 只去广告 |
+| 中文判定 | normal | normal 只看正文；strict 再看引用、作者名字和简介 |
+| 白名单 | 占位文字 | 不删的账号，填 @ 后面的用户名，多个用 `\|` 分隔 |
+| 调试日志 | false | true 打印每个接口删了哪些条目 |
+
+### 需要知道的
+
+- 只管网页版。X App 里的推广帖目前没有能用的规则（见「App 去广告合集」）。想在手机上用，Safari 打开 x.com，分享 → 添加到主屏幕。脚本也认 `api.x.com/graphql/…` 这种 App 的地址，想试 App 可以自己把 `api.x.com`、`api.twitter.com` 加进 MITM；连不上就是 App 不认 MITM 证书，删掉就好。
+- 网页上的「打开 App」弹窗由「网页弹窗和广告拦截」管，两个一起装不冲突。
+- 第一次装好后，在 Safari 设置里清一下 x.com 的网站数据，不然旧缓存里的推文还会出来。
+- 不按固定路径找，整个响应里带 `entryId` 的条目都看，X 改了外层字段名也照样能用。数据结构是照着网页版的响应写的，还没对着真机抓的响应核对过。哪里没删干净，打开「调试日志」看 Surge 日志里 `[X]` 开头的几行。
+- 测试：`node tools/test_x.js`。
 
 ## 规矩
 

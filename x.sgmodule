@@ -1,0 +1,18 @@
+#!name=X 去广告和屏蔽中文
+#!desc=Safari 里看 x.com 时，时间线、推文详情、搜索、趋势里的推广和中文推文直接从接口里删掉
+#!category=AdBlock
+#!arguments=屏蔽中文:true,中文判定:normal,白名单:"不屏蔽的账号，多个用竖线分隔",调试日志:false
+#!arguments-desc=屏蔽中文\ntrue：删掉中文推文；false：只去广告\n\n中文判定\n- normal：推文正文是中文才删（转推看被转的那条）\n- strict：另外，引用了中文推文、作者名字或简介里有汉字的推文也删，推荐关注里名字带汉字的账号也删。纯汉字的日文名字会误伤\n\n白名单\n这些账号的推文不删，填 @ 后面的用户名，多个用 | 分隔，不分大小写\n\n调试日志\ntrue：在 Surge 日志里打印每个接口删了哪些条目
+
+# 脚本：scripts/x.js（本仓库自己写的）
+# 只管网页版（Safari）。X App 里的推广帖目前没有能用的规则，见 README
+
+[Rule]
+# 不让 x.com 走 QUIC，保证请求能被 MITM
+AND,((PROTOCOL,QUIC),(DOMAIN,x.com)),REJECT
+
+[Script]
+X 去广告和屏蔽中文 = type=http-response,pattern=^https:\/\/(?:(?:x|twitter)\.com\/i\/api|api\.(?:x|twitter)\.com)\/graphql\/[\w-]+\/(?:\w*Timeline\w*|TweetDetail|ExplorePage|UserTweets\w*|UserMedia|UserHighlightsTweets|Likes|Bookmarks)(?:\?|$),requires-body=1,max-size=5242880,timeout=10,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/scripts/x.js,argument="chinese={{{屏蔽中文}}}&mode={{{中文判定}}}&allow={{{白名单}}}&debug={{{调试日志}}}"
+
+[MITM]
+hostname = %APPEND% x.com, twitter.com
