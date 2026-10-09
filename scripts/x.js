@@ -1,5 +1,6 @@
 /*
- * X 去广告、屏蔽中文和翻译：处理 x.com 网页版的 GraphQL 响应（/i/api/graphql/<id>/<操作名>），
+ * X 去广告、屏蔽中文和翻译：处理 X App（api.x.com/graphql/<id>/<操作名>）和 x.com 网页版
+ * （x.com/i/api/graphql/<id>/<操作名>）的 GraphQL 响应，
  * 时间线里的推广和中文推文直接从响应里删掉，网页根本拿不到；留下来的外文推文加上译文。
  * Surge 一个响应只跑一个脚本，所以去广告、屏蔽和翻译放在同一个脚本里。
  *
@@ -196,9 +197,21 @@ function hasPromoted(v) {
 
 // ---------- 主流程 ----------
 
+function opName(url) { return (/\/graphql\/[^\/]+\/(\w+)/.exec(url) || [])[1] || url.replace(/\?.*/, ''); }
+
+// 响应的大致结构（前五层的字段名，最多 800 个字），认不出来的接口打到调试日志里，好照着改
+function shape(v, depth) {
+  depth = depth || 0;
+  if (Array.isArray(v)) return '[' + (v.length ? shape(v[0], depth) : '') + ']';
+  if (!isObject(v)) return typeof v;
+  var keys = Object.keys(v).slice(0, 8);
+  if (depth >= 5) return '{' + keys.join(',') + '}';
+  return '{' + keys.map(function (k) { return k + ':' + shape(v[k], depth + 1); }).join(',') + '}';
+}
+
 // 请求的操作名，决定哪些地方不删中文
 function context(url, body) {
-  var op = (/\/graphql\/[^\/]+\/(\w+)/.exec(url) || [])[1] || '';
+  var op = opName(url);
   var query = '';
   var m = /[?&]variables=([^&]*)/.exec(url);
   try {
@@ -235,11 +248,14 @@ function reason(entry, ctx, top) {
 }
 
 // 整个响应走一遍。返回这一层下面（不跨过条目）剩下几个、删了几个条目，用来判断模块是不是删光了
+var seenEntries = 0;  // 一共看到几个条目，一个都没有说明响应结构不认识，调试日志里打出来
+
 function walk(v, ctx, stats, depth) {
   var result = { kept: 0, removed: 0 };
   if (Array.isArray(v)) {
     for (var i = v.length - 1; i >= 0; i--) {
       var entry = entryOf(v[i]);
+      if (entry) seenEntries++;
       var inner = walk(v[i], ctx, stats, entry ? depth + 1 : depth);
       if (!entry) { result.kept += inner.kept; result.removed += inner.removed; continue; }
       var why = inner.removed && !inner.kept ? '模块删光' : reason(entry, ctx, depth === 0);
@@ -550,13 +566,18 @@ async function translate(texts, state) {
 
 async function main() {
   var body = $response.body;
-  if (!body || typeof body !== 'string' || !/^\s*[{[]/.test(body)) return null;
+  if (!body || typeof body !== 'string' || !/^\s*[{[]/.test(body)) {
+    var headers = $response.headers || {};
+    log(opName($request.url), '不是 JSON，没处理（' + (headers['Content-Type'] || headers['content-type'] || '没有 Content-Type') + '）');
+    return null;
+  }
   var json = JSON.parse(body);
   var ctx = context($request.url, $request.body);
   var stats = {};
   walk(json, ctx, stats, 0);
+  if (!seenEntries) log(ctx.op, '没找到带 entryId 的条目，响应的结构：' + shape(json).slice(0, 800));
   var total = Object.keys(stats).reduce(function (n, k) { return n + stats[k]; }, 0);
-  log(ctx.op || $request.url.replace(/\?.*/, ''), total ? JSON.stringify(stats) : '没删东西', ctx.chinese ? '' : '（这里不屏蔽中文）');
+  log(ctx.op, total ? JSON.stringify(stats) : '没删东西', ctx.chinese ? '' : '（这里不屏蔽中文）');
   if (total) filtered = JSON.stringify(json);
 
   var canTranslate = ARGS.translate !== 'off' && (ARGS.keyList.length || ARGS.fallback === 'google');

@@ -1,5 +1,5 @@
 #!name=Twitter去广告
-#!desc=拦截 Twitter / X 的广告和统计域名。时间线里的推广帖目前没有找到能用的规则
+#!desc=拦截 Twitter / X 的广告和统计域名。时间线里的推广帖用「X 去广告、屏蔽中文和翻译」模块
 #!category=AdBlock
 #!system=ios
 

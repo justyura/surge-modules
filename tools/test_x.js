@@ -387,5 +387,23 @@ const legacyOf = (json, i) => {
   assert.deepStrictEqual(out, {});
 }
 
+// 21. App 的地址（api.x.com/graphql/…）一样处理
+{
+  const { json } = await run({
+    url: 'https://api.x.com/graphql/Xyz_9/HomeTimeline?variables=%7B%7D',
+    body: home([entry('promoted-tweet-1', tweet('1', 'ad')), entry('tweet-2', tweet('2', '中文推文的内容', { lang: 'zh' })), entry('tweet-3', tweet('3', 'hi there'))]),
+  });
+  assert.deepStrictEqual(ids(json), ['tweet-3']);
+}
+
+// 22. 认不出的响应：调试日志里打出结构；不是 JSON 打出 Content-Type
+{
+  const { out, logs } = await run({ args: ARGS('&debug=true'), url: 'https://api.x.com/graphql/a/HomeTimeline', body: { data: { feed: { items: [{ id: 1 }] } } } });
+  assert.deepStrictEqual(out, {});
+  assert.ok(logs.some((l) => l.includes('没找到带 entryId 的条目') && l.includes('{data:{feed:{items:[{id:number}]}}}')), logs.join('\n'));
+  const bin = await run({ args: ARGS('&debug=true'), url: 'https://api.x.com/graphql/a/HomeTimeline', body: '\u0000\u0001binary' });
+  assert.ok(bin.logs.some((l) => l.includes('HomeTimeline 不是 JSON')), bin.logs.join('\n'));
+}
+
 console.log('x.js: all tests passed');
 })().catch((e) => { console.error(e); process.exit(1); });
