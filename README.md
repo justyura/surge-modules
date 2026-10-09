@@ -16,7 +16,7 @@
 | Stack Overflow 翻译 | 第三方 Stack Overflow App（Octostack 等）里的标题、问题、回答、评论按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule` |
 | Stack Overflow 网页翻译 | Safari 里看 Stack Overflow 和其他 Stack Exchange 站点，同样按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow-web.sgmodule` |
 | GitHub 翻译 | GitHub 官方 App 里 Issue、PR、评论、README 按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/github.sgmodule` |
-| X 去广告和屏蔽中文 | Safari 里的 x.com，时间线、推文详情、搜索、趋势里的推广和中文推文删掉 | `https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule` |
+| X 去广告、屏蔽中文和翻译 | Safari 里的 x.com，时间线、推文详情、搜索、趋势里的推广和中文推文删掉，外文推文加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule` |
 
 ## 代理流量面板
 
@@ -128,7 +128,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 | YouTube | 首页、搜索、播放页、Shorts 里的广告，片头和中途插播广告；YouTube Music 也管。另外默认隐藏 Shorts、小游戏、竖屏直播，打开视频自动开字幕 |
 | 抖音 | 只能拦广告投放和素材域名，信息流广告去不掉 |
 | 小红书 | 开屏、首页和关注页信息流、搜索页、详情页 |
-| Twitter / X | 只能拦广告和统计域名，时间线里的推广帖目前没有可用规则。网页版用「X 去广告和屏蔽中文」 |
+| Twitter / X | 只能拦广告和统计域名，时间线里的推广帖目前没有可用规则。网页版用「X 去广告、屏蔽中文和翻译」 |
 | 微博 | 开屏、信息流、热搜、发现页、超话、详情页、评论区，含轻享版 |
 | 知乎 | 开屏、首页推荐、热榜、回答页、评论区、搜索页、会员页 |
 | 微信 | 只能去公众号文章底部广告和商品推广 |
@@ -539,13 +539,15 @@ App 编辑评论时用的是 markdown 原文（`body`），不是用来显示的
 - 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
 - 测试：`node tools/test_github.js`。
 
-## X 去广告和屏蔽中文
+## X 去广告、屏蔽中文和翻译
 
 ```
 https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule
 ```
 
-给 Safari 里的 x.com 用的，处理网页版的 GraphQL 接口（`x.com/i/api/graphql/…`），推广和中文推文在接口里就删掉，页面上不会闪一下再消失。要开 MITM。脚本是自己写的：`scripts/x.js`。
+给 Safari 里的 x.com 用的，处理网页版的 GraphQL 接口（`x.com/i/api/graphql/…`），推广和中文推文在接口里就删掉，页面上不会闪一下再消失；留下的外文推文加上译文。要开 MITM。脚本是自己写的：`scripts/x.js`。
+
+Surge 一个响应只跑一个脚本，所以去广告、屏蔽中文和翻译放在同一个脚本里。
 
 ### 去广告
 
@@ -562,6 +564,16 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule
 - `中文判定` 改成 `strict` 会删得更狠：引用了中文推文、作者名字或简介里有汉字的推文也删（专治名字是中文、发英文的机器人），推荐关注里名字带汉字的账号也删。纯汉字的日文名字会被误伤。
 - 这些地方不删：自己点开的那条推文和它上面的串、个人主页、用中文搜索的结果、白名单里的账号。
 
+### 翻译
+
+- 推文正文后面空一行接上译文。长推文翻全文，译文在全文最后，时间线上要点「显示更多」才看得到。转推翻被转的那条，引用的推文也翻。
+- X 标的语言已经是目标语言的不翻，纯链接、纯表情、只有 @ 或话题的不翻。日文、韩文照翻。
+- 推文少时一个 DeepL 请求翻完，多时拆成最多 6 个请求同时翻。翻过的缓存最近 500 条，刷新、翻回来都不再花额度。
+- 最多等 4 秒（参数「最长等待」），没翻完的显示原文，广告和中文照样删掉。刷新一下会接着翻。
+- 不填 DeepL 密钥也能用：备用翻译是 `google` 时直接用 Google 翻译。
+- DeepL key 可以和「YouTube 双语字幕」「Reddit 去广告和翻译」填一样的，哪个 key 被暂停几个模块共用。
+- 不想翻译把「翻译」改成 `off`。
+
 ### 参数
 
 | 参数 | 默认 | 说明 |
@@ -569,7 +581,12 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule
 | 屏蔽中文 | true | false 只去广告 |
 | 中文判定 | normal | normal 只看正文；strict 再看引用、作者名字和简介 |
 | 白名单 | 占位文字 | 不删的账号，填 @ 后面的用户名，多个用 `\|` 分隔 |
-| 调试日志 | false | true 打印每个接口删了哪些条目 |
+| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
+| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
+| 翻译 | all | off 不翻译 |
+| 备用翻译 | google | off 表示不用 Google 兜底 |
+| 最长等待 | 4 | 最多等几秒翻译 |
+| 调试日志 | false | true 打印每个接口删了哪些条目、翻了几条 |
 
 ### 需要知道的
 
@@ -577,6 +594,7 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule
 - 网页上的「打开 App」弹窗由「网页弹窗和广告拦截」管，两个一起装不冲突。
 - 第一次装好后，在 Safari 设置里清一下 x.com 的网站数据，不然旧缓存里的推文还会出来。
 - 不按固定路径找，整个响应里带 `entryId` 的条目都看，X 改了外层字段名也照样能用。数据结构是照着网页版的响应写的，还没对着真机抓的响应核对过。哪里没删干净，打开「调试日志」看 Surge 日志里 `[X]` 开头的几行。
+- 网页显示推文用的是 `full_text` 里 `display_text_range` 那一段，译文插在这一段末尾，后面图片链接的下标跟着往后挪，所以图片、链接、@ 都还能点。
 - 测试：`node tools/test_x.js`。
 
 ## 规矩
