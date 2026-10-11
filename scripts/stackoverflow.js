@@ -865,11 +865,13 @@ function styleRule() {
 function subtitlePrompt() {
   var lang = targetName();
   return 'You translate YouTube captions into ' + lang + '.\n'
-    + 'Input is JSON: "video" is the video title and channel (may be empty), "before" and "after" hold the captions right '
-    + 'before and after these (context only, do not translate them), "lines" holds the captions to translate, keyed by number.\n'
+    + 'Input is JSON: "video" is the video title and channel (may be empty), "summary" (may be missing) has notes on the whole '
+    + 'video: "topic" says what it is about, "terms" gives the translation to use for names and terms, "fixes" maps words the '
+    + 'captions misheard to what was actually said. "before" and "after" hold the captions right before and after these '
+    + '(context only, do not translate them), "lines" holds the captions to translate, keyed by number.\n'
     + 'Captions are consecutive fragments of speech: one sentence often runs across several lines, and auto-generated captions '
     + 'have no punctuation and may mishear words. Read all lines together to understand what is being said, fix obvious mishearings, '
-    + 'and keep names and terms consistent.\n'
+    + 'and keep names and terms consistent, using the translations in "terms".\n'
     + 'Translate every line into ' + lang + '. ' + styleRule() + '\n'
     + 'Keep each translation aligned with its own line: do not move words to another line, merge lines or leave any out. '
     + 'Keep names, brands and technical terms that are usually not translated.\n'

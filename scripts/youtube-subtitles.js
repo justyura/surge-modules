@@ -20,13 +20,14 @@
  *   keys      DeepL key，多个用 | 分隔
  *   llmkeys   大模型 key，多个用 | 分隔，出错的暂停规则和 DeepL 一样（401 当 403，额度用完当 456）
  *   model     模型名，默认 gpt-6-luna
+ *   summary   true：用大模型时先读一遍整条字幕，写出视频讲什么、术语怎么翻、哪些词听错了，每组都带上；false：不做
  *   style     大模型的译法：faithful 贴着原文翻（默认，对照着学外语），natural 更口语、可以意译
  *   effort    大模型思考档位：auto 按模型自动关掉思考，off 不带参数，或者 none、low、medium 这些
  *   api       接口地址，默认 https://api.openai.com/v1，DeepSeek 之类兼容 OpenAI 的接口也行
  *   target    目标语言，DeepL 的写法，比如 ZH-HANS、ZH-HANT、EN-US、JA
  *   position  top：原文在上；bottom：原文在下；only：只显示译文
  *   fallback  google：全部 key 失败时用 Google 翻译；off：不兜底
- *   budget    最多等几秒（默认 8）。到时间就先返回翻好的部分，没翻完的显示原文；
+ *   budget    最多等几秒（默认 12）。到时间就先返回翻好的部分，没翻完的显示原文；
  *             翻好的会缓存，重新打开字幕会接着翻剩下的
  *   debug     true：在 Surge 日志里打印每次请求的细节
  *   expand    评论直接展开全文，不用点「展开」（默认 true）
@@ -53,7 +54,7 @@ var COMMENT_CACHE = 300;         // 缓存最近多少条评论的译文
 var COMMENT_BUDGET = 4;          // 评论最多等几秒翻译，比字幕短，翻不完的先显示原文
 var COMMENT_FETCH_TIMEOUT = 10;  // 替 App 去 YouTube 拿评论最多等几秒
 var COMMENT_MARK = 'X-Surge-YT-Comments';  // 自己发出的请求带这个头，免得再被自己拦一次
-var LLM_PARALLEL = 12;           // 大模型同时发几个请求：大模型一组翻得慢，靠多组一起翻
+var LLM_PARALLEL = 16;           // 大模型同时发几个请求：大模型一组翻得慢，靠多组一起翻；等概要占了时间，多发几组补回来
 var LLM_CHARS = 800;             // 字幕一组最多多少字，组小一点每组回得快
 var LLM_ITEMS = 40;              // 一组最多多少句（条）
 var LLM_COMMENT_CHARS = 500;     // 评论一组最多多少字
@@ -64,11 +65,18 @@ var LLM_COMMENT_BUDGET = 6;      // 用大模型时评论最多等几秒
 var FALLBACK_SECONDS = 2.5;      // 离截止还剩这么多秒时，大模型没翻好的交给 DeepL / Google
 var VIDEO_STORE_KEY = 'yt-videos';
 var VIDEO_CACHE = 30;            // 记住最近多少个视频的标题
+var SUMMARY_STORE_KEY = 'yt-video-summaries';
+var SUMMARY_CACHE = 20;          // 记住最近多少个视频的概要
+var SUMMARY_CHARS = 120000;      // 整条字幕最多发多少字去做概要（大约两个半小时的视频）
+var SUMMARY_MIN_LINES = 40;      // 字幕少于这么多句不做概要，前后几句已经差不多是全部了
+var SUMMARY_WAIT = 6;            // 第一次打开时最多等概要几秒（限时的一半以内），没好就先不带，到了存下来下次用
+var SUMMARY_TERMS = 30;          // 概要里最多多少个术语，多了概要回得慢
+var SUMMARY_FIXES = 20;          // 最多多少个听错的词
 
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
 
 function parseArgs(raw) {
-  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false', vocab: '', expand: 'true', llmkeys: '', model: '', api: '', effort: '', style: 'faithful' };
+  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '12', debug: 'false', vocab: '', expand: 'true', llmkeys: '', model: '', api: '', effort: '', style: 'faithful', summary: 'true' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -78,10 +86,11 @@ function parseArgs(raw) {
   });
   args.keyList = args.keys.split(/[|;,\s]+/).filter(function (k) { return /^[\w-]+(:fx)?$/i.test(k) && k.length > 20; });
   args.target = args.target.toUpperCase();
-  args.budget = Math.min(50, Math.max(3, Number(args.budget) || 8));
+  args.budget = Math.min(50, Math.max(3, Number(args.budget) || 12));
   args.debug = args.debug === 'true';
   args.expand = args.expand !== 'false';
   args.style = args.style === 'natural' ? 'natural' : 'faithful';
+  args.summary = args.summary !== 'false';
   args.vocab = /^https?:\/\/[^\s"]+$/i.test(args.vocab) ? args.vocab.replace(/\/+$/, '') : '';
   return parseLlmArgs(args);
 }
@@ -565,11 +574,13 @@ function styleRule() {
 function subtitlePrompt() {
   var lang = targetName();
   return 'You translate YouTube captions into ' + lang + '.\n'
-    + 'Input is JSON: "video" is the video title and channel (may be empty), "before" and "after" hold the captions right '
-    + 'before and after these (context only, do not translate them), "lines" holds the captions to translate, keyed by number.\n'
+    + 'Input is JSON: "video" is the video title and channel (may be empty), "summary" (may be missing) has notes on the whole '
+    + 'video: "topic" says what it is about, "terms" gives the translation to use for names and terms, "fixes" maps words the '
+    + 'captions misheard to what was actually said. "before" and "after" hold the captions right before and after these '
+    + '(context only, do not translate them), "lines" holds the captions to translate, keyed by number.\n'
     + 'Captions are consecutive fragments of speech: one sentence often runs across several lines, and auto-generated captions '
     + 'have no punctuation and may mishear words. Read all lines together to understand what is being said, fix obvious mishearings, '
-    + 'and keep names and terms consistent.\n'
+    + 'and keep names and terms consistent, using the translations in "terms".\n'
     + 'Translate every line into ' + lang + '. ' + styleRule() + '\n'
     + 'Keep each translation aligned with its own line: do not move words to another line, merge lines or leave any out. '
     + 'Keep names, brands and technical terms that are usually not translated.\n'
@@ -586,7 +597,7 @@ function commentPrompt() {
   var lang = targetName();
   return 'You translate YouTube comments into ' + lang + '.\n'
     + 'Input is JSON: "video" is the title and channel of the video they were posted under (may be empty), '
-    + '"comments" holds the comments keyed by number. Each comment stands on its own, but they share the video\'s topic: '
+    + '"topic" (may be missing) says what the video is about, "comments" holds the comments keyed by number. Each comment stands on its own, but they share the video\'s topic: '
     + 'use it to understand references, names, slang and jokes.\n'
     + 'Translate each comment completely into ' + lang + '. ' + styleRule() + '\n'
     + 'Keep the emoji, @mentions, timestamps, links and line breaks.\n'
@@ -613,6 +624,96 @@ async function videoInfo(id) {
   list = [[id, text]].concat(list.filter(function (v) { return v[0] !== id; })).slice(0, VIDEO_CACHE);
   try { $persistentStore.write(JSON.stringify(list), VIDEO_STORE_KEY); } catch (e) {}
   return text;
+}
+
+// ---------- 视频概要：整条字幕先让大模型读一遍 ----------
+// 分组翻的时候每组只看得到前后十几句，不知道整个视频在讲什么、前面定下的术语怎么翻。
+// 所以第一次打开时先把整条字幕发过去，要回来视频讲什么、术语表、自动字幕听错的词，存起来；
+// 之后每组都带上概要和这一组用得上的术语。评论也带上视频讲什么
+
+function loadSummaries() {
+  try { return JSON.parse($persistentStore.read(SUMMARY_STORE_KEY) || '[]'); } catch (e) { return []; }
+}
+
+function saveSummary(id, summary) {
+  var list = [[id, summary]].concat(loadSummaries().filter(function (e) { return e[0] !== id; })).slice(0, SUMMARY_CACHE);
+  try { $persistentStore.write(JSON.stringify(list), SUMMARY_STORE_KEY); } catch (e) {}
+}
+
+// 存下来的概要：没有视频 ID（评论的回复）就用最近的那个
+function findSummary(videoId) {
+  var list = loadSummaries();
+  if (!videoId) return list.length ? list[0][1] : null;
+  var hit = list.filter(function (e) { return e[0] === videoId + '|' + ARGS.target; })[0];
+  return hit ? hit[1] : null;
+}
+
+function summaryPrompt() {
+  var lang = targetName();
+  return 'You prepare notes for translating the captions of a YouTube video into ' + lang + '.\n'
+    + 'Input is JSON: "video" is the video title and channel (may be empty), "transcript" is the whole caption track, one caption '
+    + 'per line. Auto-generated captions have no punctuation and may mishear words.\n'
+    + 'Reply with a JSON object with exactly these keys:\n'
+    + '"topic": 2 to 3 sentences in English: what the video is about, its field, who is speaking to whom, and the tone.\n'
+    + '"terms": an object mapping up to ' + SUMMARY_TERMS + ' names, technical terms and recurring key phrases, written exactly as '
+    + 'they appear in the transcript, to the ' + lang + ' translation to use every time: the standard established one, '
+    + 'or the original for names and terms usually left untranslated.\n'
+    + '"fixes": an object mapping words or phrases the captions clearly misheard, written exactly as they appear, '
+    + 'to what was actually said. Empty if there are none.';
+}
+
+// 只留字符串对字符串，最多 limit 个
+function stringMap(value, limit) {
+  var out = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+  Object.keys(value).slice(0, limit).forEach(function (k) {
+    if (k.trim() && typeof value[k] === 'string' && value[k].trim()) out[k.trim()] = value[k].trim();
+  });
+  return out;
+}
+
+function cleanSummary(reply) {
+  if (!reply || typeof reply !== 'object' || typeof reply.topic !== 'string' || !reply.topic.trim()) return null;
+  return { topic: reply.topic.trim().slice(0, 600), terms: stringMap(reply.terms, SUMMARY_TERMS), fixes: stringMap(reply.fixes, SUMMARY_FIXES) };
+}
+
+// 这个视频的概要：存过就直接用；没有就去要，最多等 SUMMARY_WAIT 秒（限时短时按一半），
+// 没等到先返回 null，请求回来后照样存下来，下次打开用
+function videoSummary(videoId, unique, video, state) {
+  if (!ARGS.summary || !videoId || unique.length < SUMMARY_MIN_LINES) return Promise.resolve(null);
+  var id = videoId + '|' + ARGS.target;
+  var saved = findSummary(videoId);
+  if (saved) { log('视频概要用存下来的'); return Promise.resolve(saved); }
+  var transcript = unique.join('\n').slice(0, SUMMARY_CHARS);
+  var effort = reasoningEffort(ARGS.model);
+  var started = Date.now();
+  var asking = withKeys(ARGS.llmKeyList, 'llm', state, function (key) {
+    return llmOnce(key, summaryPrompt(), { video: video, transcript: transcript }, effort);
+  }, 1).then(function (reply) {
+    var summary = cleanSummary(reply);
+    log(summary ? '视频概要 ' + ((Date.now() - started) / 1000).toFixed(1) + ' 秒，术语 ' + Object.keys(summary.terms).length
+      + ' 个，听错的词 ' + Object.keys(summary.fixes).length + ' 个：' + summary.topic : '没拿到视频概要');
+    if (summary) saveSummary(id, summary);
+    return summary;
+  });
+  return Promise.race([asking, sleep(Math.min(SUMMARY_WAIT, remaining() / 2)).then(function () { return null; })]);
+}
+
+// 一组字幕带的概要：视频讲什么，加上这一组（连同前后几句）里出现的术语和听错的词
+function summaryFor(summary, texts) {
+  if (!summary) return null;
+  var text = texts.join('\n').toLowerCase();
+  function pick(map) {
+    var out = {};
+    Object.keys(map).forEach(function (k) { if (text.indexOf(k.toLowerCase()) !== -1) out[k] = map[k]; });
+    return out;
+  }
+  var out = { topic: summary.topic };
+  var terms = pick(summary.terms);
+  var fixes = pick(summary.fixes);
+  if (Object.keys(terms).length) out.terms = terms;
+  if (Object.keys(fixes).length) out.fixes = fixes;
+  return out;
 }
 
 // ---------- 翻译调度 ----------
@@ -676,13 +777,20 @@ async function subtitlesWithLlm(unique, source, state, entry, videoId) {
   log('共 ' + unique.length + ' 句，大模型缓存命中 ' + (unique.length - todo.length) + ' 句，限时 ' + ARGS.budget + ' 秒');
   if (todo.length) {
     var video = await videoInfo(videoId);
+    var summary = await videoSummary(videoId, unique, video, state);
     var position = {};
     unique.forEach(function (t, i) { position[t] = i; });
     var system = subtitlePrompt();
     var r = await llmFirst(chunk(todo, LLM_CHARS), function (g) {
       var at = position[g.texts[0]];
       var end = position[g.texts[g.texts.length - 1]] + 1;
-      var context = { video: video, before: unique.slice(Math.max(0, at - LLM_CONTEXT_LINES), at), after: unique.slice(end, end + LLM_CONTEXT_AFTER) };
+      var before = unique.slice(Math.max(0, at - LLM_CONTEXT_LINES), at);
+      var after = unique.slice(end, end + LLM_CONTEXT_AFTER);
+      var context = { video: video };
+      var notes = summaryFor(summary, before.concat(g.texts, after));
+      if (notes) context.summary = notes;
+      context.before = before;
+      context.after = after;
       return llmTranslate(system, context, 'lines', g.texts, state);
     }, fallbackWith(rough, function (need) { return translateAll(need, source, state, {}); }));
     Object.keys(r.best).forEach(function (t) { best[t] = cleanup(r.best[t]); });
@@ -1056,7 +1164,8 @@ async function commentsMain() {
   if (!canTranslate && !ARGS.expand) { log('没有可用的 DeepL key'); return null; }
 
   // 视频标题给大模型当上下文，和拿评论同时进行
-  var video = ARGS.llmKeyList.length ? videoInfo(commentsVideoId($request.body)) : Promise.resolve('');
+  var videoId = commentsVideoId($request.body);
+  var video = ARGS.llmKeyList.length ? videoInfo(videoId) : Promise.resolve('');
   var upstream = await fetchUpstream();
   if (!upstream) return null;  // 没拿到就让 App 自己的请求照常发出去
   var response = { status: upstream.status, headers: upstream.headers, body: upstream.body };
@@ -1064,7 +1173,7 @@ async function commentsMain() {
   var body = upstream.body;
   if (upstream.status !== 200 || !(body instanceof Uint8Array)) return commentFallback;
 
-  var map = canTranslate ? await translateCommentTexts(body, video) : {};
+  var map = canTranslate ? await translateCommentTexts(body, video, videoId) : {};
   var patched = Object.keys(map).length ? pbRewrite(body, COMMENT_TEXT_PATH, function (bytes) {
     var text = new TextDecoder().decode(bytes);
     var translation = map[text];
@@ -1076,8 +1185,16 @@ async function commentsMain() {
   return commentFallback;
 }
 
-// 找出要翻的评论去翻译，返回 { 评论原文: 译文 }。video 是视频标题（Promise），给大模型当上下文
-async function translateCommentTexts(body, video) {
+// 评论的上下文：视频标题，看过字幕、有概要的话再加上视频讲什么
+async function commentContext(video, videoId) {
+  var context = { video: await video };
+  var summary = findSummary(videoId);
+  if (summary) context.topic = summary.topic;
+  return context;
+}
+
+// 找出要翻的评论去翻译，返回 { 评论原文: 译文 }。video 是视频标题（Promise），videoId 可能是空的（回复），给大模型当上下文
+async function translateCommentTexts(body, video, videoId) {
   var decoder = new TextDecoder();
   var originals = [];
   pbRewrite(body, COMMENT_TEXT_PATH, function (bytes) { originals.push(decoder.decode(bytes)); return null; });
@@ -1095,7 +1212,7 @@ async function translateCommentTexts(body, video) {
   DEADLINE = Date.now() + budget * 1000;
   arm(budget + 2);
   var map = await translateCached(todo, {
-    system: commentPrompt(), context: { video: await video }, field: 'comments', chars: LLM_COMMENT_CHARS,
+    system: commentPrompt(), context: await commentContext(video, videoId), field: 'comments', chars: LLM_COMMENT_CHARS,
     load: loadCommentCache, save: saveCommentCache, key: function (t) { return ARGS.style + '#' + commentCacheKey(t); }, translate: translateComments,
   });
   log('翻好 ' + Object.keys(map).length + ' / ' + todo.length + ' 条');

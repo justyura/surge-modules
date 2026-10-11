@@ -610,5 +610,53 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  译法：默认贴着原文翻，natural 可以意译，字幕和评论都按它，缓存分开');
   }
 
+  // 25. 视频概要：整条字幕先读一遍，每组带上视频讲什么和用得上的术语；存下来只做一次；评论也带上
+  {
+    const lines = Array.from({ length: 60 }, (_, i) => i === 30 ? 'and that is the end of the talk' : `so this is caption number ${i}`);
+    const r = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1, LLM()) });
+    const sums = r.calls.filter((c) => c.vendor === 'llm-summary');
+    assert.strictEqual(sums.length, 1, '做一次概要');
+    assert.strictEqual(sums[0].payload.transcript, lines.join('\n'), '整条字幕都发过去');
+    assert.strictEqual(sums[0].payload.video, 'Fixing a squeaky door — Handy Dan');
+    assert.strictEqual(sums[0].effort, 'none');
+    assert.ok(sums[0].system.includes('"terms"') && sums[0].system.includes('"fixes"'));
+    const calls = llmCalls(r);
+    assert.ok(calls.every((c) => c.payload.summary && c.payload.summary.topic === 'A talk about captions.'), '每组都带视频讲什么');
+    assert.ok(calls.every((c) => c.payload.summary.terms.caption === '字幕' && !('unused' in c.payload.summary.terms)), '只带这一组用得上的术语');
+    const withTalk = calls.filter((c) => c.payload.summary.fixes);
+    assert.ok(withTalk.length >= 1 && withTalk.every((c) => JSON.stringify(c.payload).includes('the talk')), '听错的词只给出现它的组');
+    assert.deepStrictEqual(Object.keys(calls[0].payload).slice(0, 2), ['video', 'summary']);
+    assert.ok(calls[0].system.includes('"summary"'));
+
+    // 换了译法要重翻字幕，概要不再做
+    const r2 = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1, LLM() + '&style=natural'), store: r.store });
+    assert.strictEqual(r2.calls.filter((c) => c.vendor === 'llm-summary').length, 0, '概要存下来了');
+    assert.ok(llmCalls(r2).length > 0 && llmCalls(r2).every((c) => c.payload.summary.topic === 'A talk about captions.'));
+
+    // 字幕太短、关掉概要：不做
+    const r3 = await run({ url: URL_EN.replace('vid1', 'short'), body: json3(lines.slice(0, 20)), args: ARGS(K1, LLM()) });
+    assert.strictEqual(r3.calls.filter((c) => c.vendor === 'llm-summary').length, 0, '短字幕不做概要');
+    const r4 = await run({ url: URL_EN.replace('vid1', 'off'), body: json3(lines), args: ARGS(K1, LLM() + '&summary=false') });
+    assert.strictEqual(r4.calls.filter((c) => c.vendor === 'llm-summary').length, 0, 'summary=false 不做');
+    assert.ok(llmCalls(r4).every((c) => !c.payload.summary));
+
+    // 概要卡住：最多等限时的一半，不带概要接着翻
+    const r5 = await run({ url: URL_EN.replace('vid1', 'slow'), body: json3(lines), args: ARGS(K1, LLM() + '&budget=6'), llm: { summary: 'hang' } });
+    assert.ok(r5.seconds >= 2.9 && r5.seconds < 6.5, `等了 ${r5.seconds} 秒`);
+    assert.ok(llmCalls(r5).length > 0 && llmCalls(r5).every((c) => !c.payload.summary));
+    assert.ok(events(r5.out).every((l, i) => l === lines[i] + '\n模:' + lines[i]), '没等到概要也照样用大模型翻');
+
+    // 评论：有这个视频的概要就带上视频讲什么；回复用最近的
+    const store = { 'yt-video-summaries': JSON.stringify([['dQw4w9WgXcQ|ZH-HANS', { topic: 'A music video.', terms: {}, fixes: {} }]]) };
+    const c = await runComments({ upstream: commentsPb(['Classic song']), store, extra: LLM() });
+    assert.strictEqual(llmCalls(c)[0].payload.topic, 'A music video.');
+    assert.ok(llmCalls(c)[0].system.includes('"topic"'));
+    const c2 = await runComments({ upstream: commentsPb(['Nice reply here']), browseId: 'FEcomment_watch_replies_panel', store: c.store, extra: LLM() });
+    assert.strictEqual(llmCalls(c2)[0].payload.topic, 'A music video.', '回复用最近的概要');
+    const c3 = await runComments({ upstream: commentsPb(['Classic tune']), extra: LLM() });
+    assert.ok(!('topic' in llmCalls(c3)[0].payload), '没有概要就不带');
+    console.log(`ok  视频概要：整条字幕读一遍，${calls.length} 组都带上概要和用得上的术语，只做一次；卡住不等；评论也带视频讲什么`);
+  }
+
   console.log('全部通过');
 })().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

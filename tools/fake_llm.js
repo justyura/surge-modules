@@ -9,12 +9,23 @@
 //   error: 出错时的 body
 //   reasoning: 回复里 usage 报的思考 token（默认 0）
 //   reply: 直接用这个当 message.content
+//   summary: 视频概要请求（payload 里有 transcript）的回复对象，默认 SUMMARY；'hang' 永不返回
+//   summaryLatency: 概要请求的毫秒
 // }
 // 不是发给大模型的请求返回 false，交给调用方处理
+const SUMMARY = { topic: 'A talk about captions.', terms: { caption: '字幕', talk: '演讲', unused: '没出现' }, fixes: { 'the talk': 'the TALK' } };
+
 module.exports = function fakeLlm(req, cb, calls, llm = {}) {
   if (!req.url.endsWith('/chat/completions')) return false;
   const b = JSON.parse(req.body);
   const payload = JSON.parse(b.messages[1].content);
+  if (payload.transcript !== undefined) {
+    calls.push({ vendor: 'llm-summary', model: b.model, effort: b.reasoning_effort, system: b.messages[0].content, payload });
+    if (llm.summary === 'hang') return true;
+    const content = JSON.stringify(llm.summary || SUMMARY);
+    setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ choices: [{ message: { content } }] })), llm.summaryLatency || 0);
+    return true;
+  }
   const field = ['texts', 'lines', 'comments'].find((f) => payload[f]);
   calls.push({
     vendor: 'llm', url: req.url, key: req.headers.Authorization.replace('Bearer ', ''), model: b.model, effort: b.reasoning_effort,
