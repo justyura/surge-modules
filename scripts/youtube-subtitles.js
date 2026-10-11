@@ -10,8 +10,17 @@
  *   网络错误              → 不暂停，直接换下一个
  * 全部 key 都不行时，按设置用 Google 翻译兜底；再不行就原样返回字幕，不影响播放。
  *
+ * 填了大模型 key（OpenAI 或兼容 OpenAI 的接口）就先用大模型翻，DeepL / Google 变成兜底：
+ *   - 字幕按时间顺序分组，每组带上前面几句和视频标题，大模型能看懂整句话、纠正自动字幕听错的词
+ *   - 评论带上视频标题，几条一组同时翻
+ *   - 快到截止时间还没翻好的先用 DeepL / Google 顶上，大模型晚到的结果照样盖上去；
+ *     兜底的译文单独缓存，下次打开还会交给大模型重翻
+ *
  * 参数（模块里的 argument，用 & 分隔）：
  *   keys      DeepL key，多个用 | 分隔
+ *   llmkeys   大模型 key，多个用 | 分隔，出错的暂停规则和 DeepL 一样（401 当 403，额度用完当 456）
+ *   model     模型名，默认 gpt-4.1-mini
+ *   api       接口地址，默认 https://api.openai.com/v1，DeepSeek 之类兼容 OpenAI 的接口也行
  *   target    目标语言，DeepL 的写法，比如 ZH-HANS、ZH-HANT、EN-US、JA
  *   position  top：原文在上；bottom：原文在下；only：只显示译文
  *   fallback  google：全部 key 失败时用 Google 翻译；off：不兜底
@@ -42,11 +51,22 @@ var COMMENT_CACHE = 300;         // 缓存最近多少条评论的译文
 var COMMENT_BUDGET = 4;          // 评论最多等几秒翻译，比字幕短，翻不完的先显示原文
 var COMMENT_FETCH_TIMEOUT = 10;  // 替 App 去 YouTube 拿评论最多等几秒
 var COMMENT_MARK = 'X-Surge-YT-Comments';  // 自己发出的请求带这个头，免得再被自己拦一次
+var LLM_PARALLEL = 12;           // 大模型同时发几个请求：大模型一组翻得慢，靠多组一起翻
+var LLM_CHARS = 800;             // 字幕一组最多多少字，组小一点每组回得快
+var LLM_ITEMS = 40;              // 一组最多多少句（条）
+var LLM_COMMENT_CHARS = 500;     // 评论一组最多多少字
+var LLM_MIN_SECONDS = 3;         // 离截止不到这么多秒（限时很短时按一半）就不再开始新的一组，开始了也翻不完
+var LLM_CONTEXT_LINES = 6;       // 每组字幕带上前面几句当上下文
+var LLM_COMMENT_BUDGET = 6;      // 用大模型时评论最多等几秒
+var FALLBACK_SECONDS = 2.5;      // 离截止还剩这么多秒时，大模型没翻好的交给 DeepL / Google
+var LLM_TAG = 'llm#';            // 评论缓存里大模型译文的前缀，兜底的译文不带
+var VIDEO_STORE_KEY = 'yt-videos';
+var VIDEO_CACHE = 30;            // 记住最近多少个视频的标题
 
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
 
 function parseArgs(raw) {
-  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false', vocab: '', expand: 'true' };
+  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false', vocab: '', expand: 'true', llmkeys: '', model: '', api: '' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -60,6 +80,10 @@ function parseArgs(raw) {
   args.debug = args.debug === 'true';
   args.expand = args.expand !== 'false';
   args.vocab = /^https?:\/\/[^\s"]+$/i.test(args.vocab) ? args.vocab.replace(/\/+$/, '') : '';
+  // 占位文字（中文）会被滤掉，等于没填
+  args.llmKeyList = args.llmkeys.split(/[|,\s]+/).filter(function (k) { return /^[\x21-\x7e]{20,}$/.test(k); });
+  args.model = /^[\w.:\/-]+$/.test(args.model) ? args.model : 'gpt-4.1-mini';
+  args.api = /^https?:\/\/[^\s"]+$/i.test(args.api) ? args.api.replace(/\/+$/, '').replace(/\/chat\/completions$/, '') : 'https://api.openai.com/v1';
   return args;
 }
 
@@ -78,9 +102,9 @@ function remaining() { return (DEADLINE - Date.now()) / 1000; }
 function loadState() {
   try {
     var state = JSON.parse($persistentStore.read(STORE_KEY) || '{}');
-    return { paused: state.paused || {}, current: state.current || '', cache: state.cache || [] };
+    return { paused: state.paused || {}, current: state.current || '', llm: state.llm || '', cache: state.cache || [] };
   } catch (e) {
-    return { paused: {}, current: '', cache: [] };
+    return { paused: {}, current: '', llm: '', cache: [] };
   }
 }
 
@@ -132,18 +156,19 @@ function deeplOnce(key, texts, source, xml) {
   });
 }
 
-// 按顺序试 key：先用上次成功的那个，出错就换下一个。返回译文数组，全部失败返回 null
-async function deepl(texts, source, state, xml) {
-  var keys = ARGS.keyList.slice();
-  var start = keys.indexOf(state.current);
+// 按顺序试 key：先用上次成功的那个，出错就换下一个。attempt(key) 返回 { ok, list } 或 { ok: false, status }。
+// slot 是状态里记「上次成功的 key」（指纹）的字段。返回 list，全部失败返回 null
+async function withKeys(keys, slot, state, attempt, minLeft) {
+  keys = keys.slice();
+  var start = keys.map(fingerprint).indexOf(state[slot]);
   if (start > 0) keys = keys.slice(start).concat(keys.slice(0, start));
   for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
     if (state.paused[fingerprint(key)] > now()) continue;
-    if (remaining() < 1) return null;
-    var r = await deeplOnce(key, texts, source, xml);
+    if (remaining() < minLeft) return null;
+    var r = await attempt(key);
     if (r.ok) {
-      state.current = key;
+      state[slot] = fingerprint(key);
       return r.list;
     }
     var pause = PAUSE[r.status] || (r.status >= 500 ? PAUSE[5] : 0);
@@ -151,6 +176,10 @@ async function deepl(texts, source, state, xml) {
     if (pause) state.paused[fingerprint(key)] = now() + pause;
   }
   return null;
+}
+
+function deepl(texts, source, state, xml) {
+  return withKeys(ARGS.keyList, 'current', state, function (key) { return deeplOnce(key, texts, source, xml); }, 1);
 }
 
 // 几十句字幕打包成一段：<t>句1</t><t>句2</t>…，DeepL 按 XML 处理会保留标签，
@@ -211,11 +240,11 @@ function group(units) {
   return requests;
 }
 
-// 并发跑一组任务，截止时间到了就不再开始新的
-async function parallel(tasks, limit, run) {
+// 并发跑一组任务，离截止不到 minLeft 秒（默认 1）就不再开始新的
+async function parallel(tasks, limit, run, minLeft) {
   var next = 0;
   async function worker() {
-    while (next < tasks.length && remaining() > 1) await run(tasks[next++]);
+    while (next < tasks.length && remaining() > (minLeft || 1)) await run(tasks[next++]);
   }
   var workers = [];
   for (var i = 0; i < Math.min(limit, tasks.length); i++) workers.push(worker());
@@ -255,6 +284,180 @@ async function google(cues, result) {
       lines.forEach(function (line, i) { if (out[i].trim()) result[line] = out[i].trim(); });
     } catch (e) {}
   });
+}
+
+// ---------- 大模型：OpenAI 或兼容 OpenAI 的接口 ----------
+
+var LANG_NAMES = {
+  ZH: 'Simplified Chinese', 'ZH-HANS': 'Simplified Chinese', 'ZH-HANT': 'Traditional Chinese',
+  EN: 'English', 'EN-US': 'American English', 'EN-GB': 'British English', JA: 'Japanese', KO: 'Korean',
+  FR: 'French', DE: 'German', ES: 'Spanish', IT: 'Italian', RU: 'Russian', PT: 'Portuguese', 'PT-BR': 'Brazilian Portuguese',
+};
+
+function targetName() { return LANG_NAMES[ARGS.target] || LANG_NAMES[ARGS.target.split('-')[0]] || ARGS.target; }
+
+// gpt-5 系列默认先「思考」再回答，翻译用不着，关掉省时间；其他模型不带这个参数
+function reasoningEffort(model) {
+  if (/^gpt-5(?:-mini|-nano)?(?:-\d{4}-\d{2}-\d{2})?$/.test(model)) return 'minimal';
+  if (/^gpt-5\.\d/.test(model)) return 'none';
+  return '';
+}
+
+function llmOnce(key, system, payload, effort) {
+  var body = {
+    model: ARGS.model,
+    messages: [{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(payload) }],
+    response_format: { type: 'json_object' },
+  };
+  if (effort) body.reasoning_effort = effort;
+  return request('post', {
+    url: ARGS.api + '/chat/completions',
+    headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    timeout: Math.max(2, Math.min(30, Math.ceil(remaining()))),
+  }).then(function (r) {
+    if (r.error) return { ok: false, status: 0 };
+    // 这个模型不认 reasoning_effort：去掉再试一次
+    if (r.status === 400 && effort && /reasoning/i.test(r.body)) return llmOnce(key, system, payload, '');
+    if (r.status !== 200) {
+      log('大模型出错，状态码 ' + r.status + '：' + String(r.body || '').slice(0, 200));
+      // 401 key 无效按 403 暂停；429 里的额度用完（insufficient_quota）按 456 暂停
+      return { ok: false, status: r.status === 401 ? 403 : r.status === 429 && /insufficient_quota/.test(r.body) ? 456 : r.status };
+    }
+    try {
+      var content = JSON.parse(r.body).choices[0].message.content;
+      return { ok: true, list: JSON.parse(String(content).replace(/^\s*```(?:json)?|```\s*$/g, '')) };
+    } catch (e) {
+      log('大模型返回的不是 JSON');
+      return { ok: true, list: {} };  // key 没问题，这一组交给兜底
+    }
+  });
+}
+
+// 一组文字交给大模型：编号成 { "1": …, "2": … } 放进 payload[field]，payload 里其他字段是上下文。
+// 返回 { 原文: 译文 }（模型漏掉的不在里面）；大模型用不了返回 null
+async function llmTranslate(system, payload, field, items, state) {
+  var numbered = {};
+  items.forEach(function (t, i) { numbered[i + 1] = t; });
+  payload[field] = numbered;
+  var effort = reasoningEffort(ARGS.model);
+  var reply = await withKeys(ARGS.llmKeyList, 'llm', state, function (key) { return llmOnce(key, system, payload, effort); }, 1);
+  if (!reply || typeof reply !== 'object') return reply ? {} : null;
+  // 有的模型会再包一层，比如 { "translations": { "1": … } }
+  var names = Object.keys(reply);
+  if (names.length === 1 && reply[names[0]] && typeof reply[names[0]] === 'object') reply = reply[names[0]];
+  var out = {};
+  items.forEach(function (t, i) {
+    var v = Array.isArray(reply) ? reply[i] : reply[i + 1];
+    if (typeof v === 'string' && v.trim()) out[t] = v.trim();
+  });
+  return out;
+}
+
+// 按字数分组：一组不超过 chars 字、LLM_ITEMS 条。大模型一组要好几秒，组小一点、多组同时翻更快
+function chunk(texts, chars) {
+  var groups = [];
+  var g = null;
+  texts.forEach(function (t) {
+    if (!g || g.texts.length >= LLM_ITEMS || (g.texts.length && g.size + t.length > chars)) {
+      g = { texts: [], size: 0 };
+      groups.push(g);
+    }
+    g.texts.push(t);
+    g.size += t.length;
+  });
+  return groups;
+}
+
+function sleep(seconds) {
+  return new Promise(function (resolve) { setTimeout(resolve, Math.max(0, seconds * 1000)); });
+}
+
+// 大模型先翻，DeepL / Google 兜底。各组同时翻，runGroup(组) 返回 { 原文: 译文 }，大模型用不了返回 null。
+// 离截止还剩 FALLBACK_SECONDS 秒时，还没翻好的（包括正在翻的）交给 fallback 先翻一版，大模型用不了就马上交。
+// 大模型晚到的结果照样用。返回 { best: 大模型的译文, rough: 兜底的译文 }
+async function llmFirst(groups, runGroup, fallback) {
+  var best = {};
+  var rough = {};
+  var down = false;
+  var wake;
+  var woken = new Promise(function (resolve) { wake = resolve; });
+  var minLeft = Math.min(LLM_MIN_SECONDS, remaining() / 2);  // 限时很短时也至少翻第一批
+  var llmDone = parallel(groups, LLM_PARALLEL, async function (g) {
+    if (down) return;
+    var out = await runGroup(g);
+    if (!out) { down = true; wake(); return; }
+    Object.keys(out).forEach(function (t) { best[t] = out[t]; });
+  }, minLeft).then(wake);
+  if (fallback) {
+    await Promise.race([woken, sleep(remaining() - FALLBACK_SECONDS)]);
+    var left = [];
+    groups.forEach(function (g) { g.texts.forEach(function (t) { if (!(t in best)) left.push(t); }); });
+    if (left.length) {
+      log('大模型' + (down ? '用不了' : '还没翻完') + '，' + left.length + ' 段先用 DeepL / Google');
+      rough = await fallback(left);
+    }
+  }
+  await Promise.race([llmDone, sleep(remaining())]);  // 卡住的请求不等，到截止就用手上有的
+  log('大模型翻好 ' + Object.keys(best).length + ' 段，兜底 ' + Object.keys(rough).length + ' 段');
+  return { best: best, rough: rough };
+}
+
+// 兜底：缓存里有上次兜底的译文就直接用，剩下的交给 translate(texts) → Promise<{ 原文: 译文 }>
+function fallbackWith(rough, translate) {
+  if (!ARGS.keyList.length && ARGS.fallback !== 'google') return null;
+  return function (left) {
+    var out = {};
+    var need = left.filter(function (t) { if (rough[t]) out[t] = rough[t]; return !rough[t]; });
+    if (!need.length) return out;
+    return translate(need).then(function (map) { Object.keys(map).forEach(function (t) { out[t] = map[t]; }); return out; });
+  };
+}
+
+function subtitlePrompt() {
+  var lang = targetName();
+  return 'You translate YouTube captions into ' + lang + '.\n'
+    + 'Input is JSON: "video" is the video title and channel (may be empty), "before" holds the captions right before these '
+    + '(context only, do not translate them), "lines" holds the captions to translate, keyed by number.\n'
+    + 'Captions are consecutive fragments of speech: one sentence often runs across several lines, and auto-generated captions '
+    + 'have no punctuation and may mishear words. Read all lines together to understand what is being said, fix obvious mishearings, '
+    + 'and keep names and terms consistent.\n'
+    + 'Translate every line into natural spoken ' + lang + '. Keep each translation aligned with its own line: do not move words '
+    + 'to another line, merge lines or leave any out. Keep names, brands and technical terms that are usually not translated.\n'
+    + 'Reply with a JSON object mapping each line number to its translation, with exactly the same keys and nothing else.';
+}
+
+function commentPrompt() {
+  var lang = targetName();
+  return 'You translate YouTube comments into ' + lang + '.\n'
+    + 'Input is JSON: "video" is the title and channel of the video they were posted under (may be empty), '
+    + '"comments" holds the comments keyed by number. Each comment stands on its own, but they share the video\'s topic: '
+    + 'use it to understand references, names, slang and jokes.\n'
+    + 'Translate each comment completely into natural ' + lang + ', the way a native speaker would write it. '
+    + 'Keep the tone, emoji, @mentions, timestamps, links and line breaks. Do not add explanations.\n'
+    + 'Reply with a JSON object mapping each comment number to its translation, with exactly the same keys and nothing else.';
+}
+
+// 视频标题和频道名，给大模型当上下文。用 oEmbed 拿，不用登录；最近看过的存起来。
+// 回复（/browse）的请求里没有视频 ID，用最近的那个
+function loadVideos() {
+  try { return JSON.parse($persistentStore.read(VIDEO_STORE_KEY) || '[]'); } catch (e) { return []; }
+}
+
+async function videoInfo(id) {
+  var list = loadVideos();
+  if (!id) return list.length ? list[0][1] : '';
+  var hit = list.filter(function (v) { return v[0] === id; })[0];
+  var text = hit ? hit[1] : await request('get', {
+    url: 'https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id),
+    timeout: 2,
+  }).then(function (r) {
+    try { var j = JSON.parse(r.body); return [j.title, j.author_name].filter(Boolean).join(' — '); } catch (e) { return ''; }
+  });
+  if (!text) return '';
+  list = [[id, text]].concat(list.filter(function (v) { return v[0] !== id; })).slice(0, VIDEO_CACHE);
+  try { $persistentStore.write(JSON.stringify(list), VIDEO_STORE_KEY); } catch (e) {}
+  return text;
 }
 
 // ---------- 翻译调度 ----------
@@ -305,6 +508,33 @@ async function translateAll(texts, source, state, cached) {
   }
   log('翻好 ' + Object.keys(result).length + ' / ' + texts.length + ' 句，剩余时间 ' + remaining().toFixed(1) + ' 秒');
   return result;
+}
+
+// 用大模型翻字幕：按时间顺序分组，开头的先翻好；每组带上前面几句和视频标题当上下文。
+// 返回 { map: 显示用的译文, save: 存进缓存的 }。缓存里 map 是大模型的译文，
+// rough 是兜底的译文，下次打开还会交给大模型重翻，大模型没翻到之前先用它
+async function subtitlesWithLlm(unique, source, state, entry, videoId) {
+  var best = {};
+  Object.keys(entry ? entry.map : {}).forEach(function (t) { best[t] = entry.map[t]; });
+  var rough = (entry && entry.rough) || {};
+  var todo = unique.filter(function (t) { return !(t in best); });
+  log('共 ' + unique.length + ' 句，大模型缓存命中 ' + (unique.length - todo.length) + ' 句，限时 ' + ARGS.budget + ' 秒');
+  if (todo.length) {
+    var video = await videoInfo(videoId);
+    var position = {};
+    unique.forEach(function (t, i) { position[t] = i; });
+    var system = subtitlePrompt();
+    var r = await llmFirst(chunk(todo, LLM_CHARS), function (g) {
+      var at = position[g.texts[0]];
+      return llmTranslate(system, { video: video, before: unique.slice(Math.max(0, at - LLM_CONTEXT_LINES), at) }, 'lines', g.texts, state);
+    }, fallbackWith(rough, function (need) { return translateAll(need, source, state, {}); }));
+    Object.keys(r.best).forEach(function (t) { best[t] = cleanup(r.best[t]); });
+  }
+  var keep = {};
+  [rough, r ? r.rough : {}].forEach(function (m) { Object.keys(m).forEach(function (t) { if (!(t in best)) keep[t] = m[t]; }); });
+  var map = {};
+  [keep, best].forEach(function (m) { Object.keys(m).forEach(function (t) { map[t] = m[t]; }); });
+  return { map: map, save: { map: best, rough: keep } };
 }
 
 // ---------- 字幕格式 ----------
@@ -533,11 +763,32 @@ function pbRewrite(bytes, path, edit) {
 // 打开评论区、往下翻都是这种 token；推荐视频翻页等其他 /next 请求不是。
 // 回复（/browse）：browseId 是 FEcomment_watch_replies_panel，往下翻回复时它在 base64 的
 // continuation token 里，按三种对齐方式分别是 RkVjb21tZW50、ZFY29tbWVu、GRWNvbW1lbnRf
-function isCommentsRequest(body) {
-  if (!body || !body.length) return false;
+function bodyText(body) {
   var text = '';
   for (var i = 0; i < body.length; i += 8192) text += String.fromCharCode.apply(null, body.subarray(i, i + 8192));
-  return /Eg0SC[\w-]{15}GAY|FEcomment_|RkVjb21tZW50|ZFY29tbWVu|GRWNvbW1lbnRf/.test(text);
+  return text;
+}
+
+function isCommentsRequest(body) {
+  if (!body || !body.length) return false;
+  return /Eg0SC[\w-]{15}GAY|FEcomment_|RkVjb21tZW50|ZFY29tbWVu|GRWNvbW1lbnRf/.test(bodyText(body));
+}
+
+// 评论区 token 的前 20 个字符解开是 12 0d 12 0b + 11 位视频 ID。回复的 token 里没有，返回空
+function commentsVideoId(body) {
+  var m = /Eg0SC[\w-]{15}/.exec(bodyText(body));
+  if (!m) return '';
+  var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  var bytes = [];
+  var bits = 0;
+  var value = 0;
+  for (var i = 0; i < m[0].length; i++) {
+    value = ((value << 6) | alphabet.indexOf(m[0][i])) & 0xffff;
+    bits += 6;
+    if (bits >= 8) { bits -= 8; bytes.push((value >> bits) & 255); }
+  }
+  var id = String.fromCharCode.apply(null, bytes.slice(4, 15));
+  return /^[\w-]{11}$/.test(id) ? id : '';
 }
 
 // isExpanded 设成 true，其他字段不动
@@ -612,6 +863,15 @@ async function translateComments(texts, state) {
   return result;
 }
 
+// 用大模型翻评论：几条一组同时翻，带上视频标题。返回 { best: 大模型的译文, rough: 兜底的译文 }
+function commentsWithLlm(texts, state, rough, video) {
+  var system = commentPrompt();
+  log('评论用大模型翻，视频：' + (video || '不知道'));
+  return llmFirst(chunk(texts, LLM_COMMENT_CHARS), function (g) {
+    return llmTranslate(system, { video: video }, 'comments', g.texts, state);
+  }, fallbackWith(rough, function (need) { return translateComments(need, state); }));
+}
+
 // 替 App 把请求发出去，拿到原始响应（binary）
 function fetchUpstream() {
   var headers = {};
@@ -644,9 +904,11 @@ async function commentsMain() {
     return { headers: clean };
   }
   if (!(($request.body || {}) instanceof Uint8Array) || !isCommentsRequest($request.body)) return null;
-  var canTranslate = ARGS.keyList.length || ARGS.fallback === 'google';
+  var canTranslate = ARGS.llmKeyList.length || ARGS.keyList.length || ARGS.fallback === 'google';
   if (!canTranslate && !ARGS.expand) { log('没有可用的 DeepL key'); return null; }
 
+  // 视频标题给大模型当上下文，和拿评论同时进行
+  var video = ARGS.llmKeyList.length ? videoInfo(commentsVideoId($request.body)) : Promise.resolve('');
   var upstream = await fetchUpstream();
   if (!upstream) return null;  // 没拿到就让 App 自己的请求照常发出去
   var response = { status: upstream.status, headers: upstream.headers, body: upstream.body };
@@ -654,7 +916,7 @@ async function commentsMain() {
   var body = upstream.body;
   if (upstream.status !== 200 || !(body instanceof Uint8Array)) return commentFallback;
 
-  var map = canTranslate ? await translateCommentTexts(body) : {};
+  var map = canTranslate ? await translateCommentTexts(body, video) : {};
   var patched = Object.keys(map).length ? pbRewrite(body, COMMENT_TEXT_PATH, function (bytes) {
     var text = new TextDecoder().decode(bytes);
     var translation = map[text];
@@ -666,8 +928,8 @@ async function commentsMain() {
   return commentFallback;
 }
 
-// 找出要翻的评论去翻译，返回 { 评论原文: 译文 }
-async function translateCommentTexts(body) {
+// 找出要翻的评论去翻译，返回 { 评论原文: 译文 }。video 是视频标题（Promise），给大模型当上下文
+async function translateCommentTexts(body, video) {
   var decoder = new TextDecoder();
   var originals = [];
   pbRewrite(body, COMMENT_TEXT_PATH, function (bytes) { originals.push(decoder.decode(bytes)); return null; });
@@ -681,27 +943,40 @@ async function translateCommentTexts(body) {
   log('评论 ' + originals.length + ' 条，要翻 ' + todo.length + ' 条');
   if (!todo.length) return {};
 
-  DEADLINE = Date.now() + Math.min(ARGS.budget, COMMENT_BUDGET) * 1000;
-  arm(Math.min(ARGS.budget, COMMENT_BUDGET) + 2);
+  var useLlm = ARGS.llmKeyList.length > 0;
+  var budget = Math.min(ARGS.budget, useLlm ? LLM_COMMENT_BUDGET : COMMENT_BUDGET);
+  DEADLINE = Date.now() + budget * 1000;
+  arm(budget + 2);
+  // 大模型的译文缓存时 key 前面加 LLM_TAG；不带的是 DeepL / Google 的，用大模型时只拿来兜底
   var cache = loadCommentCache();
   var known = {};
   cache.forEach(function (e) { known[e[0]] = e[1]; });
   var map = {};
   var missing = [];
+  var rough = {};
   todo.forEach(function (t) {
-    var k = known[commentCacheKey(t)];
-    if (k) map[t] = k;
+    var k = commentCacheKey(t);
+    var hit = known[(useLlm ? LLM_TAG : '') + k];
+    if (hit) map[t] = hit;
     else missing.push(t);
+    if (!hit && useLlm && known[k]) rough[t] = known[k];
   });
   if (missing.length) {
     var state = loadState();
-    var fresh = await translateComments(missing, state);
+    var fresh = useLlm ? await commentsWithLlm(missing, state, rough, await video)
+      : { best: {}, rough: await translateComments(missing, state) };
     saveState(state);
-    Object.keys(fresh).forEach(function (t) {
-      map[t] = fresh[t];
-      cache.unshift([commentCacheKey(t), fresh[t]]);
+    var added = 0;
+    Object.keys(fresh.rough).forEach(function (t) {
+      map[t] = fresh.rough[t];
+      if (!rough[t]) { cache.unshift([commentCacheKey(t), fresh.rough[t]]); added++; }
     });
-    if (Object.keys(fresh).length) saveCommentCache(cache);
+    Object.keys(fresh.best).forEach(function (t) {
+      map[t] = fresh.best[t];
+      cache.unshift([LLM_TAG + commentCacheKey(t), fresh.best[t]]);
+      added++;
+    });
+    if (added) saveCommentCache(cache);
   }
   log('缓存命中 ' + (todo.length - missing.length) + ' 条，翻好 ' + Object.keys(map).length + ' / ' + todo.length + ' 条');
 
@@ -725,7 +1000,9 @@ function main() {
   if (param(url, 'tlang')) { log('YouTube 自带翻译字幕，跳过'); return Promise.resolve(null); }
   if (lang && lang.split('-')[0] === ARGS.target.split('-')[0].toLowerCase()) { log('已经是目标语言，跳过'); return Promise.resolve(null); }
   var wantVocab = !!ARGS.vocab && (!lang || lang.split('-')[0] === 'en');
-  if (!ARGS.keyList.length && ARGS.fallback !== 'google' && !wantVocab) { log('没有可用的 DeepL key'); return Promise.resolve(null); }
+  var useLlm = ARGS.llmKeyList.length > 0;
+  var canTranslate = useLlm || ARGS.keyList.length || ARGS.fallback === 'google';
+  if (!canTranslate && !wantVocab) { log('没有可用的 DeepL key'); return Promise.resolve(null); }
 
   var format = detect(url, body);
   if (!format) { log('不认识的字幕格式'); return Promise.resolve(null); }
@@ -737,22 +1014,29 @@ function main() {
   if (!unique.length) return Promise.resolve(null);
 
   var state = loadState();
-  var cacheId = [param(url, 'v'), lang, param(url, 'kind'), ARGS.target].join('|');
+  // 大模型和 DeepL 的译文分开缓存，换了模型也重翻
+  var cacheId = [param(url, 'v'), lang, param(url, 'kind'), ARGS.target].concat(useLlm ? [ARGS.model] : []).join('|');
   var entry = state.cache.filter(function (c) { return c.id === cacheId; })[0];
   var cached = entry ? entry.map : {};
   // DeepL 的源语言写法：en、ja → EN、JA；自动生成字幕的语言也能用
   var source = lang ? lang.split('-')[0].toUpperCase() : '';
 
-  var canTranslate = ARGS.keyList.length || ARGS.fallback === 'google';
   var words = !wantVocab ? Promise.resolve(null)
     : entry && entry.words ? Promise.resolve(entry.words)
     : fetchWords(unique);
 
-  return Promise.all([canTranslate ? translateAll(unique, source, state, cached) : Promise.resolve(cached), words]).then(function (results) {
-    var map = results[0];
+  var translating = !canTranslate ? Promise.resolve({ map: cached, save: { map: cached } })
+    : useLlm ? subtitlesWithLlm(unique, source, state, entry, param(url, 'v'))
+    : translateAll(unique, source, state, cached).then(function (map) { return { map: map, save: { map: map } }; });
+
+  return Promise.all([translating, words]).then(function (results) {
+    var map = results[0].map;
     var list = results[1];
+    var saved = results[0].save;
+    saved.id = cacheId;
+    if (list) saved.words = list;
     state.cache = state.cache.filter(function (c) { return c.id !== cacheId; });
-    state.cache.unshift(list ? { id: cacheId, map: map, words: list } : { id: cacheId, map: map });
+    state.cache.unshift(saved);
     state.cache = state.cache.slice(0, CACHE_VIDEOS);
     saveState(state);
     var notes = placeNotes(texts, list);

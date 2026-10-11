@@ -18,9 +18,35 @@ function fakeDeepl(text, xml, mode) {
   return text.replace(/<t>([\s\S]*?)<\/t>/g, '<t>译:$1</t>');
 }
 
+// 假的大模型（OpenAI Chat Completions）：把 lines / comments 里每一段加上「模:」。
+// llm = { status: 200 | 状态码 | 'hang', latency, drop: 漏掉的编号, wrap: true（多包一层）, error: 出错时的 body }
+const OEMBED = { vid1: 'Fixing a squeaky door — Handy Dan', dQw4w9WgXcQ: 'Never Gonna Give You Up — Rick Astley' };
+function fakeLlm(req, cb, calls, llm = {}) {
+  const b = JSON.parse(req.body);
+  const payload = JSON.parse(b.messages[1].content);
+  const field = payload.lines ? 'lines' : 'comments';
+  calls.push({ vendor: 'llm', url: req.url, key: req.headers.Authorization.replace('Bearer ', ''), model: b.model, effort: b.reasoning_effort,
+    format: b.response_format.type, system: b.messages[0].content, payload, n: Object.keys(payload[field]).length });
+  const status = llm.status ?? 200;
+  if (status === 'hang') return;
+  setTimeout(() => {
+    if (status !== 200) return cb(null, { status }, llm.error || '{"error":{"message":"err"}}');
+    let out = {};
+    for (const [k, v] of Object.entries(payload[field])) if (k !== String(llm.drop)) out[k] = '模:' + v;
+    if (llm.wrap) out = { translations: out };
+    cb(null, { status: 200 }, JSON.stringify({ choices: [{ message: { content: JSON.stringify(out) } }] }));
+  }, llm.latency || 0);
+}
+function fakeOembed(req, cb, calls) {
+  const id = /watch%3Fv%3D([\w-]+)/.exec(req.url)[1];
+  calls.push({ vendor: 'oembed', id });
+  const [title, author] = (OEMBED[id] || '').split(' — ');
+  setTimeout(() => (title ? cb(null, { status: 200 }, JSON.stringify({ title, author_name: author })) : cb(null, { status: 404 }, 'Not Found')));
+}
+
 // behavior[key] = 状态码 | 'network' | 'merge'（标签被 DeepL 合并）| 'hang'（永不返回），默认 200
 // vocab: 生词服务返回的 words 数组，或 'down'（连不上）、'hang'（不返回）
-function run({ url, body, args, behavior = {}, store = {}, google = true, latency = 0, vocab = [] }) {
+function run({ url, body, args, behavior = {}, store = {}, google = true, latency = 0, vocab = [], llm }) {
   const calls = [];
   const started = Date.now();
   return new Promise((resolve) => {
@@ -37,6 +63,7 @@ function run({ url, body, args, behavior = {}, store = {}, google = true, latenc
             if (vocab === 'down') return setTimeout(() => cb('connection refused', null, null));
             return setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ words: vocab })));
           }
+          if (req.url.endsWith('/chat/completions')) return fakeLlm(req, cb, calls, llm);
           const key = req.headers.Authorization.replace('DeepL-Auth-Key ', '');
           const b = JSON.parse(req.body);
           const xml = b.tag_handling === 'xml';
@@ -52,6 +79,7 @@ function run({ url, body, args, behavior = {}, store = {}, google = true, latenc
           setTimeout(reply, latency);
         },
         get(req, cb) {
+          if (req.url.includes('/oembed?')) return fakeOembed(req, cb, calls);
           const q = decodeURIComponent(/[?&]q=([^&]*)/.exec(req.url)[1]);
           calls.push({ vendor: 'google', lines: q.split('\n').length });
           if (!google) return setTimeout(() => cb('down', null, null));
@@ -133,7 +161,7 @@ function commentTexts(buf) {
 }
 
 // upstream: Buffer（YouTube 返回的评论）| 'network' | 状态码
-function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dzlXZ1hjUTAAeAI', browseId, headers, behavior = {}, store = {}, extra = '', keys = K1 }) {
+function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dzlXZ1hjUTAAeAI', browseId, headers, behavior = {}, store = {}, extra = '', keys = K1, llm }) {
   const calls = [];
   const started = Date.now();
   const body = new Uint8Array(Buffer.concat([field(1, Buffer.from('context')), browseId ? field(2, Buffer.from(browseId)) : field(3, Buffer.from(token))]));
@@ -154,6 +182,7 @@ function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dz
             const reply = typeof upstream === 'number' ? new Uint8Array(0) : new Uint8Array(upstream);
             return setTimeout(() => cb(null, { status: typeof upstream === 'number' ? upstream : 200, headers: { 'Content-Type': 'application/x-protobuf', 'Content-Encoding': 'gzip', 'Content-Length': '1' } }, reply));
           }
+          if (req.url.endsWith('/chat/completions')) return fakeLlm(req, cb, calls, llm);
           const key = req.headers.Authorization.replace('DeepL-Auth-Key ', '');
           const b = JSON.parse(req.body);
           calls.push({ vendor: 'deepl', key, n: b.text.length, xml: b.tag_handling === 'xml', source: b.source_lang });
@@ -163,6 +192,7 @@ function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dz
           setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ translations: b.text.map((t) => ({ text: '译:' + t })) })));
         },
         get(req, cb) {
+          if (req.url.includes('/oembed?')) return fakeOembed(req, cb, calls);
           const q = decodeURIComponent(/[?&]q=([^&]*)/.exec(req.url)[1]);
           calls.push({ vendor: 'google' });
           setTimeout(() => cb(null, { status: 200 }, JSON.stringify([[[q.split('\n').map((l) => '谷:' + l).join('\n'), q]]])));
@@ -181,6 +211,10 @@ const URL_EN = 'https://www.youtube.com/api/timedtext?v=vid1&lang=en&fmt=json3';
 const ARGS = (keys, extra = '') => `keys=${keys}&target=ZH-HANS&position=top&fallback=google&debug=false${extra}`;
 const state = (store) => JSON.parse(store['yt-subtitles-deepl']);
 const deeplCalls = (r) => r.calls.filter((c) => c.vendor === 'deepl');
+const llmCalls = (r) => r.calls.filter((c) => c.vendor === 'llm');
+const L1 = 'sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const L2 = 'sk-proj-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const LLM = (keys = L1) => `&llmkeys=${keys}`;
 
 (async () => {
   // 1. 第一个 key 额度用完（456），自动换第二个
@@ -192,10 +226,10 @@ const deeplCalls = (r) => r.calls.filter((c) => c.vendor === 'deepl');
     assert.strictEqual(r.calls[0].target, 'ZH-HANS');
     assert.strictEqual(r.calls[0].source, 'EN');
     const s = state(r.store);
-    assert.strictEqual(s.current, K2);
+    assert.strictEqual(s.current, K2.slice(-6) + '#1qfyqcx', '记住的是第二个 key 的指纹');
     const pausedFor = Object.values(s.paused)[0] - Math.floor(Date.now() / 1000);
     assert.ok(pausedFor > 86000 && pausedFor <= 86400, '456 暂停 24 小时');
-    assert.ok(!JSON.stringify(s).includes(K1), '状态里不存明文 key');
+    assert.ok(!JSON.stringify(s).includes(K1) && !JSON.stringify(s).includes(K2), '状态里不存明文 key');
 
     const r2 = await run({ url: URL_EN.replace('vid1', 'vid2'), body: json3(['Next']), args: ARGS(`${K1}|${K2}`), behavior: { [K1]: 456 }, store: r.store });
     assert.deepStrictEqual(r2.calls.map((c) => c.key), [K2]);
@@ -446,6 +480,119 @@ const deeplCalls = (r) => r.calls.filter((c) => c.vendor === 'deepl');
     assert.deepStrictEqual(r3.out, {});
     assert.strictEqual(r3.calls.length, 0);
     console.log('ok  展开：默认展开全文，可以关掉；不翻译时也能单独展开');
+  }
+
+  // 17. 大模型：字幕分组翻，带视频标题和前面几句当上下文；不再用 DeepL；同一视频走缓存
+  {
+    const lines = Array.from({ length: 60 }, (_, i) => `so this is caption number ${i} of the talk`);
+    const r = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1, LLM()) });
+    const out = events(r.out);
+    assert.strictEqual(out[0], lines[0] + '\n模:' + lines[0]);
+    assert.ok(out.every((l, i) => l === lines[i] + '\n模:' + lines[i]), '每句都是大模型的译文');
+    assert.strictEqual(deeplCalls(r).length, 0, '大模型翻完了就不用 DeepL');
+    const calls = llmCalls(r);
+    assert.ok(calls.length >= 2, '分成几组同时翻');
+    assert.strictEqual(calls[0].url, 'https://api.openai.com/v1/chat/completions');
+    assert.deepStrictEqual([calls[0].key, calls[0].model, calls[0].effort, calls[0].format], [L1, 'gpt-4.1-mini', undefined, 'json_object']);
+    assert.ok(calls[0].system.includes('Simplified Chinese'));
+    assert.strictEqual(calls[0].payload.video, 'Fixing a squeaky door — Handy Dan', '视频标题当上下文');
+    assert.deepStrictEqual(calls[0].payload.before, []);
+    const second = calls.find((c) => c.payload.lines['1'] !== lines[0]);
+    const at = lines.indexOf(second.payload.lines['1']);
+    assert.deepStrictEqual(second.payload.before, lines.slice(at - 6, at), '后面的组带上前 6 句');
+    assert.ok(!JSON.stringify(r.store).includes(L1), '状态里不存大模型 key 明文');
+
+    const r2 = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1, LLM()), store: r.store });
+    assert.strictEqual(r2.calls.length, 0, '同一个视频再打开走缓存，标题也不再查');
+    assert.strictEqual(events(r2.out)[5], out[5]);
+    // 关掉大模型：大模型的缓存不当 DeepL 的用
+    const r3 = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1), store: r.store });
+    assert.ok(deeplCalls(r3).length > 0 && events(r3.out)[0] === lines[0] + '\n译:' + lines[0]);
+    console.log(`ok  大模型：字幕分 ${calls.length} 组同时翻，带视频标题和前 6 句，DeepL 不用，缓存分开`);
+  }
+
+  // 18. 大模型 key 无效（401）：暂停 7 天、换下一个；都不行马上用 DeepL，不等到截止
+  {
+    const r = await run({ url: URL_EN, body: json3(['Hi there']), args: ARGS(K1, LLM(L1) + '&budget=8'), llm: { status: 401 } });
+    assert.deepStrictEqual(events(r.out), ['Hi there\n译:Hi there']);
+    assert.ok(r.seconds < 1, `大模型用不了应该马上兜底，实际 ${r.seconds} 秒`);
+    const paused = Object.values(state(r.store).paused).map((t) => t - Math.floor(Date.now() / 1000));
+    assert.ok(paused.length === 1 && paused[0] > 7 * 86400 - 100, '401 暂停 7 天');
+    const r2 = await run({ url: URL_EN.replace('vid1', 'vid2'), body: json3(['Bye']), args: ARGS(K1, LLM(`${L1}|${L2}`)), store: r.store });
+    assert.deepStrictEqual(llmCalls(r2).map((c) => c.key), [L2], '暂停中的 key 跳过');
+    // 额度用完（429 insufficient_quota）按 24 小时暂停；普通 429 一分钟
+    const r3 = await run({ url: URL_EN, body: json3(['A b']), args: ARGS(K1, LLM()), llm: { status: 429, error: '{"error":{"code":"insufficient_quota"}}' } });
+    const p3 = Object.values(state(r3.store).paused)[0] - Math.floor(Date.now() / 1000);
+    assert.ok(p3 > 86000 && p3 <= 86400, '额度用完暂停 24 小时');
+    console.log('ok  大模型 key 无效暂停 7 天、额度用完暂停 24 小时，都用不了马上换 DeepL');
+  }
+
+  // 19. 大模型慢：快到截止先用 DeepL 顶上，大模型在截止前回来就换成大模型的
+  {
+    const r = await run({ url: URL_EN, body: json3(['Slow one', 'Slow two']), args: ARGS(K1, LLM() + '&budget=4'), llm: { latency: 2000 } });
+    assert.deepStrictEqual(events(r.out), ['Slow one\n模:Slow one', 'Slow two\n模:Slow two']);
+    assert.strictEqual(deeplCalls(r).length, 1, '截止前 2.5 秒先请求了 DeepL');
+    assert.ok(r.seconds >= 1.9 && r.seconds < 3, `等大模型回来，实际 ${r.seconds} 秒`);
+    console.log(`ok  大模型慢：先请求 DeepL 兜底，大模型 ${r.seconds.toFixed(1)} 秒回来后用大模型的`);
+  }
+
+  // 20. 大模型卡死：到截止返回 DeepL 的；下次打开交给大模型重翻，DeepL 的缓存只当兜底不再请求
+  {
+    const r = await run({ url: URL_EN, body: json3(['Stuck one', 'Stuck two']), args: ARGS(K1, LLM() + '&budget=4'), llm: { status: 'hang' } });
+    assert.deepStrictEqual(events(r.out), ['Stuck one\n译:Stuck one', 'Stuck two\n译:Stuck two']);
+    assert.ok(r.seconds >= 3.9 && r.seconds < 4.6, `应该在截止时返回，实际 ${r.seconds} 秒`);
+    const r2 = await run({ url: URL_EN, body: json3(['Stuck one', 'Stuck two']), args: ARGS(K1, LLM() + '&budget=4'), store: r.store });
+    assert.deepStrictEqual(events(r2.out), ['Stuck one\n模:Stuck one', 'Stuck two\n模:Stuck two']);
+    assert.strictEqual(deeplCalls(r2).length, 0);
+    const r3 = await run({ url: URL_EN, body: json3(['Stuck one', 'Stuck two']), args: ARGS(K1, LLM()), store: r2.store });
+    assert.strictEqual(r3.calls.length, 0, '大模型翻好后走缓存');
+    console.log(`ok  大模型卡死：${r.seconds.toFixed(1)} 秒返回 DeepL 的，下次换成大模型的，之后走缓存`);
+  }
+
+  // 21. 大模型漏了一句：这一句用 DeepL；多包一层也认得；gpt-5 关掉思考，模型不认就去掉参数重试；自定义接口
+  {
+    const r = await run({ url: URL_EN, body: json3(['One', 'Two', 'Three']), args: ARGS(K1, LLM() + '&budget=3'), llm: { drop: 2, wrap: true } });
+    assert.deepStrictEqual(events(r.out), ['One\n模:One', 'Two\n译:Two', 'Three\n模:Three']);
+    assert.deepStrictEqual(deeplCalls(r).map((c) => c.cues), [1], '只有漏掉的那句交给 DeepL');
+
+    const r2 = await run({ url: URL_EN, body: json3(['Hey']), args: ARGS(K1, LLM() + '&model=gpt-5-mini&api=https://llm.example.com/v1/') });
+    assert.deepStrictEqual([llmCalls(r2)[0].url, llmCalls(r2)[0].model, llmCalls(r2)[0].effort], ['https://llm.example.com/v1/chat/completions', 'gpt-5-mini', 'minimal']);
+    const r3 = await run({ url: URL_EN, body: json3(['Hey']), args: ARGS(K1, LLM() + '&model=gpt-5.4-nano'), llm: { status: 400, error: '{"error":{"message":"Unsupported value: reasoning_effort"}}' } });
+    assert.deepStrictEqual(llmCalls(r3).map((c) => c.effort), ['none', undefined], '不认 reasoning_effort 就去掉重试');
+    // 占位文字当没填
+    const r4 = await run({ url: URL_EN, body: json3(['Hey']), args: ARGS(K1, '&llmkeys=不用大模型就留着') });
+    assert.strictEqual(llmCalls(r4).length, 0);
+    console.log('ok  大模型漏句用 DeepL 补、多包一层也认，gpt-5 关思考，不认参数就重试，占位文字当没填');
+  }
+
+  // 22. 大模型翻评论：带视频标题（从 token 解出视频 ID），缓存带前缀；回复用最近的视频标题
+  {
+    const r = await runComments({ upstream: commentsPb(COMMENTS), extra: LLM() });
+    assert.deepStrictEqual(commentTexts(r.out.response.body), [
+      'Great video, thanks!\n模:Great video, thanks!', '这个视频太棒了', '😂😂😂',
+      'Watch the Eclipse⁠关联 tonight\n模:Watch the Eclipse tonight', 'すごい動画です\n模:すごい動画です', 'Great video, thanks!\n模:Great video, thanks!',
+    ]);
+    const calls = llmCalls(r);
+    assert.strictEqual(deeplCalls(r).length, 0);
+    assert.deepStrictEqual(r.calls.filter((c) => c.vendor === 'oembed').map((c) => c.id), ['dQw4w9WgXcQ']);
+    assert.strictEqual(calls[0].payload.video, 'Never Gonna Give You Up — Rick Astley');
+    assert.ok(calls[0].system.includes('YouTube comments'));
+    assert.strictEqual(calls.reduce((n, c) => n + c.n, 0), 3, '重复的只翻一次');
+    const r2 = await runComments({ upstream: commentsPb(COMMENTS), store: r.store, extra: LLM() });
+    assert.strictEqual(r2.calls.filter((c) => c.vendor !== 'upstream').length, 0, '第二次全走缓存');
+    const r3 = await runComments({ upstream: commentsPb(['Nice reply']), browseId: 'FEcomment_watch_replies_panel', store: r.store, extra: LLM() });
+    assert.strictEqual(llmCalls(r3)[0].payload.video, 'Never Gonna Give You Up — Rick Astley', '回复用最近的视频');
+    console.log('ok  大模型翻评论：带视频标题，缓存生效，回复里也知道是哪个视频');
+  }
+
+  // 23. 评论：大模型用不了时，以前 DeepL 翻过的直接用，不重复请求
+  {
+    const r = await runComments({ upstream: commentsPb(COMMENTS) });
+    const r2 = await runComments({ upstream: commentsPb(COMMENTS), store: r.store, extra: LLM(), llm: { status: 401 } });
+    assert.strictEqual(commentTexts(r2.out.response.body)[0], 'Great video, thanks!\n译:Great video, thanks!');
+    assert.strictEqual(deeplCalls(r2).length, 0);
+    assert.strictEqual(llmCalls(r2).length, 1);
+    console.log('ok  评论：大模型用不了时用以前 DeepL 的缓存，不再花 DeepL 额度');
   }
 
   console.log('全部通过');

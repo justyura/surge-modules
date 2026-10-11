@@ -12,7 +12,8 @@ const ARGS = (extra = '', keys = K1) => `keys=${keys}&target=ZH-HANS&translate=a
 
 // behavior: 200 | 状态码 | 'hang'；google: true | false
 // google: true | false | 'merge'（多行合成一行返回，行数对不上）
-function run({ body, args = ARGS(), behavior = 200, google = true, store = {}, latency = 0 }) {
+// llm: 假的大模型 { status: 200 | 状态码, latency }，把 texts 里每段加上「模:」
+function run({ body, args = ARGS(), behavior = 200, google = true, store = {}, latency = 0, llm = {} }) {
   const calls = [];
   const logs = [];
   const started = Date.now();
@@ -25,6 +26,14 @@ function run({ body, args = ARGS(), behavior = 200, google = true, store = {}, l
       $httpClient: {
         post(req, cb) {
           const b = JSON.parse(req.body);
+          if (req.url.endsWith('/chat/completions')) {
+            const payload = JSON.parse(b.messages[1].content);
+            calls.push({ vendor: 'llm', model: b.model, system: b.messages[0].content, payload });
+            const status = llm.status ?? 200;
+            if (status !== 200) return setTimeout(() => cb(null, { status }, '{"error":{"message":"err"}}'));
+            const out = Object.fromEntries(Object.entries(payload.texts).map(([k, v]) => [k, '模:' + v]));
+            return setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ choices: [{ message: { content: JSON.stringify(out) } }] })), llm.latency || 0);
+          }
           calls.push({ vendor: 'deepl', texts: b.text, source: b.source_lang });
           if (behavior === 'hang') return;
           if (behavior !== 200) return setTimeout(() => cb(null, { status: behavior }, '{}'));
@@ -272,6 +281,47 @@ const postPage = () => ({
     const r = await run({ body: { data: { user: { name: '同一个名字' } } } });
     assert.deepStrictEqual(r.out, {});
     console.log('ok  没有要改的就原样放行');
+  }
+
+  // 7. 大模型：帖子页带上帖子标题；评论单独一个响应时用刚打开的帖子标题；信息流不带
+  {
+    const L = '&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const r = await run({ body: postPage(), args: ARGS(L) });
+    const p = r.json.data.postInfoById;
+    assert.strictEqual(p.title, 'How do I fix a squeaky door?\n模:How do I fix a squeaky door?');
+    assert.strictEqual(p.commentForest.trees[0].node.content.markdown, 'Try a little oil on the hinge.\n\n模:Try a little oil on the hinge.');
+    const llm = r.calls.filter((c) => c.vendor === 'llm');
+    assert.ok(llm.length >= 1 && !r.calls.some((c) => c.vendor === 'deepl'), '大模型翻完不用 DeepL');
+    assert.strictEqual(llm[0].payload.post, 'How do I fix a squeaky door?');
+    assert.strictEqual(llm[0].model, 'gpt-4.1-mini');
+    assert.ok(llm[0].system.includes('Reddit') && llm[0].system.includes('Simplified Chinese'));
+    assert.deepStrictEqual(llm.flatMap((c) => Object.values(c.payload.texts)).slice(0, 2), ['How do I fix a squeaky door?', 'It squeaks every time. See this video.'], '按页面顺序，标题在前');
+
+    const comments = { data: { postInfoById: { __typename: 'SubredditPost', id: 't3_p', commentForest: { trees: [
+      { depth: 0, node: { __typename: 'Comment', id: 'c9', content: content('WD-40 works too.') } },
+    ] } } } };
+    const r2 = await run({ body: comments, args: ARGS(L), store: r.store });
+    assert.strictEqual(r2.calls.find((c) => c.vendor === 'llm').payload.post, 'How do I fix a squeaky door?', '评论用刚打开的帖子标题');
+    const r3 = await run({ body: feed(), args: ARGS(L), store: r.store });
+    assert.strictEqual(r3.calls.find((c) => c.vendor === 'llm').payload.post, '', '信息流不带帖子标题');
+    // 同样的内容第二次走缓存；关掉大模型时大模型的缓存不当 DeepL 的用
+    const r4 = await run({ body: postPage(), args: ARGS(L), store: r.store });
+    assert.strictEqual(r4.calls.length, 0);
+    const r5 = await run({ body: postPage(), store: r.store });
+    assert.ok(r5.calls.some((c) => c.vendor === 'deepl'));
+    console.log('ok  大模型：帖子页带标题，评论单独加载也知道是哪个帖子，信息流不带，缓存和 DeepL 分开');
+  }
+
+  // 8. 大模型用不了（401）：马上用 DeepL；以前 DeepL 翻过的直接用
+  {
+    const L = '&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const r = await run({ body: postPage(), args: ARGS(L + '&budget=6'), llm: { status: 401 } });
+    assert.strictEqual(r.json.data.postInfoById.title, 'How do I fix a squeaky door?\n译:How do I fix a squeaky door?');
+    assert.ok(r.seconds < 1, `应该马上兜底，实际 ${r.seconds} 秒`);
+    const r2 = await run({ body: postPage(), args: ARGS('&llmkeys=sk-proj-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'), llm: { status: 500 }, store: r.store });
+    assert.ok(!r2.calls.some((c) => c.vendor === 'deepl'), 'DeepL 翻过的不再请求');
+    assert.strictEqual(r2.json.data.postInfoById.title, 'How do I fix a squeaky door?\n译:How do I fix a squeaky door?');
+    console.log('ok  大模型用不了马上换 DeepL，以前 DeepL 翻过的直接用');
   }
 
   console.log('全部通过');

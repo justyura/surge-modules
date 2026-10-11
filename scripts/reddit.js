@@ -15,8 +15,15 @@
  * DeepL 部分照搬 youtube-subtitles.js：多个 key 按顺序用，出错按类型暂停，全部不行用
  * Google 兜底。key 的暂停状态和 YouTube 字幕存在同一个地方，同一个 key 两边都知道它暂停了。
  *
+ * 填了大模型 key（OpenAI 或兼容 OpenAI 的接口）就先用大模型翻，DeepL / Google 变成兜底，做法和
+ * youtube-subtitles.js 一样：几段一组同时翻，按页面顺序排，同一条帖子、评论的几段挨在一起；帖子页带上帖子标题。
+ * 快到截止还没翻好的先用 DeepL / Google 顶上，兜底的译文单独缓存，下次还会交给大模型重翻。
+ *
  * 参数（模块里的 argument，用 & 分隔）：
  *   keys      DeepL key，多个用 | 分隔
+ *   llmkeys   大模型 key，多个用 | 分隔
+ *   model     模型名，默认 gpt-4.1-mini
+ *   api       接口地址，默认 https://api.openai.com/v1
  *   target    目标语言，DeepL 的写法，比如 ZH-HANS、ZH-HANT、EN-US、JA
  *   translate all：标题、正文、评论都翻；title：只翻标题；off：只去广告
  *   fallback  google：全部 key 失败时用 Google 翻译；off：不兜底
@@ -35,9 +42,17 @@ var PARALLEL = 6;                       // 同时发几个请求：评论多的�
 var MIN_BYTES_PER_REQUEST = 2000;       // 内容少时不拆得太碎
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
 var AD_LISTS = ['commentsPageAds', 'commentTreeAds', 'pdpCommentsAds'];
+var LLM_PARALLEL = 8;                   // 大模型同时发几个请求
+var LLM_CHARS = 600;                    // 一组最多多少字，组小一点每组回得快
+var LLM_ITEMS = 40;                     // 一组最多多少段
+var LLM_MIN_SECONDS = 3;                // 离截止不到这么多秒（限时很短时按一半）就不再开始新的一组
+var FALLBACK_SECONDS = 2;               // 离截止还剩这么多秒时，大模型没翻好的交给 DeepL / Google
+var LLM_TAG = 'llm#';                   // 缓存里大模型译文的前缀，兜底的译文不带
+var POST_KEY = 'reddit-last-post';      // 最近打开的帖子标题：评论有时单独一个响应，里面没有标题
+var POST_SECONDS = 600;                 // 帖子标题多久内还算数
 
 function parseArgs(raw) {
-  var args = { keys: '', target: 'ZH-HANS', translate: 'all', fallback: 'google', budget: '4', debug: 'false' };
+  var args = { keys: '', target: 'ZH-HANS', translate: 'all', fallback: 'google', budget: '4', debug: 'false', llmkeys: '', model: '', api: '' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -50,6 +65,10 @@ function parseArgs(raw) {
   args.translate = /^(all|title|off)$/.test(args.translate) ? args.translate : 'all';
   args.budget = Math.min(20, Math.max(1, Number(args.budget) || 4));
   args.debug = args.debug === 'true';
+  // 占位文字（中文）会被滤掉，等于没填
+  args.llmKeyList = args.llmkeys.split(/[|,\s]+/).filter(function (k) { return /^[\x21-\x7e]{20,}$/.test(k); });
+  args.model = /^[\w.:\/-]+$/.test(args.model) ? args.model : 'gpt-4.1-mini';
+  args.api = /^https?:\/\/[^\s"]+$/i.test(args.api) ? args.api.replace(/\/+$/, '').replace(/\/chat\/completions$/, '') : 'https://api.openai.com/v1';
   return args;
 }
 
@@ -213,7 +232,7 @@ function paragraphJob(content, done) {
 }
 
 function titleJob(node) {
-  return { texts: [node.title.trim()], apply: function (lookup) {
+  return { texts: [node.title.trim()], title: node.title, apply: function (lookup) {
     var t = lookup(node.title);
     if (!t) return 0;
     node.title = node.title + '\n' + t;
@@ -341,17 +360,19 @@ function deeplOnce(key, texts) {
   });
 }
 
-async function deepl(texts, state) {
-  var keys = ARGS.keyList.slice();
-  var start = keys.indexOf(state.current);
+// 按顺序试 key：先用上次成功的那个，出错就换下一个。attempt(key) 返回 { ok, list } 或 { ok: false, status }。
+// slot 是状态里记「上次成功的 key」（指纹）的字段。返回 list，全部失败返回 null
+async function withKeys(keys, slot, state, attempt, minLeft) {
+  keys = keys.slice();
+  var start = keys.map(fingerprint).indexOf(state[slot]);
   if (start > 0) keys = keys.slice(start).concat(keys.slice(0, start));
   for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
     if (state.paused[fingerprint(key)] > now()) continue;
-    if (remaining() < 0.5) return null;
-    var r = await deeplOnce(key, texts);
+    if (remaining() < minLeft) return null;
+    var r = await attempt(key);
     if (r.ok) {
-      state.current = key;
+      state[slot] = fingerprint(key);
       return r.list;
     }
     var pause = PAUSE[r.status] || (r.status >= 500 ? PAUSE[5] : 0);
@@ -361,10 +382,15 @@ async function deepl(texts, state) {
   return null;
 }
 
-async function parallel(tasks, limit, run) {
+function deepl(texts, state) {
+  return withKeys(ARGS.keyList, 'current', state, function (key) { return deeplOnce(key, texts); }, 0.5);
+}
+
+// 并发跑一组任务，离截止不到 minLeft 秒（默认 0.5）就不再开始新的
+async function parallel(tasks, limit, run, minLeft) {
   var next = 0;
   async function worker() {
-    while (next < tasks.length && remaining() > 0.5) await run(tasks[next++]);
+    while (next < tasks.length && remaining() > (minLeft || 0.5)) await run(tasks[next++]);
   }
   var workers = [];
   for (var i = 0; i < Math.min(limit, tasks.length); i++) workers.push(worker());
@@ -470,6 +496,172 @@ async function translate(texts, state) {
   return result;
 }
 
+// ---------- 大模型：OpenAI 或兼容 OpenAI 的接口 ----------
+
+var LANG_NAMES = {
+  ZH: 'Simplified Chinese', 'ZH-HANS': 'Simplified Chinese', 'ZH-HANT': 'Traditional Chinese',
+  EN: 'English', 'EN-US': 'American English', 'EN-GB': 'British English', JA: 'Japanese', KO: 'Korean',
+  FR: 'French', DE: 'German', ES: 'Spanish', IT: 'Italian', RU: 'Russian', PT: 'Portuguese', 'PT-BR': 'Brazilian Portuguese',
+};
+
+function targetName() { return LANG_NAMES[ARGS.target] || LANG_NAMES[ARGS.target.split('-')[0]] || ARGS.target; }
+
+// gpt-5 系列默认先「思考」再回答，翻译用不着，关掉省时间；其他模型不带这个参数
+function reasoningEffort(model) {
+  if (/^gpt-5(?:-mini|-nano)?(?:-\d{4}-\d{2}-\d{2})?$/.test(model)) return 'minimal';
+  if (/^gpt-5\.\d/.test(model)) return 'none';
+  return '';
+}
+
+function llmOnce(key, system, payload, effort) {
+  var body = {
+    model: ARGS.model,
+    messages: [{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(payload) }],
+    response_format: { type: 'json_object' },
+  };
+  if (effort) body.reasoning_effort = effort;
+  return request('post', {
+    url: ARGS.api + '/chat/completions',
+    headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    timeout: Math.max(2, Math.min(30, Math.ceil(remaining()))),
+  }).then(function (r) {
+    if (r.error) return { ok: false, status: 0 };
+    // 这个模型不认 reasoning_effort：去掉再试一次
+    if (r.status === 400 && effort && /reasoning/i.test(r.body)) return llmOnce(key, system, payload, '');
+    if (r.status !== 200) {
+      log('大模型出错，状态码 ' + r.status + '：' + String(r.body || '').slice(0, 200));
+      // 401 key 无效按 403 暂停；429 里的额度用完（insufficient_quota）按 456 暂停
+      return { ok: false, status: r.status === 401 ? 403 : r.status === 429 && /insufficient_quota/.test(r.body) ? 456 : r.status };
+    }
+    try {
+      var content = JSON.parse(r.body).choices[0].message.content;
+      return { ok: true, list: JSON.parse(String(content).replace(/^\s*```(?:json)?|```\s*$/g, '')) };
+    } catch (e) {
+      log('大模型返回的不是 JSON');
+      return { ok: true, list: {} };  // key 没问题，这一组交给兜底
+    }
+  });
+}
+
+// 一组文字交给大模型：编号成 { "1": …, "2": … } 放进 payload[field]，payload 里其他字段是上下文。
+// 返回 { 原文: 译文 }（模型漏掉的不在里面）；大模型用不了返回 null
+async function llmTranslate(system, payload, field, items, state) {
+  var numbered = {};
+  items.forEach(function (t, i) { numbered[i + 1] = t; });
+  payload[field] = numbered;
+  var effort = reasoningEffort(ARGS.model);
+  var reply = await withKeys(ARGS.llmKeyList, 'llm', state, function (key) { return llmOnce(key, system, payload, effort); }, 1);
+  if (!reply || typeof reply !== 'object') return reply ? {} : null;
+  // 有的模型会再包一层，比如 { "translations": { "1": … } }
+  var names = Object.keys(reply);
+  if (names.length === 1 && reply[names[0]] && typeof reply[names[0]] === 'object') reply = reply[names[0]];
+  var out = {};
+  items.forEach(function (t, i) {
+    var v = Array.isArray(reply) ? reply[i] : reply[i + 1];
+    if (typeof v === 'string' && v.trim()) out[t] = v.trim();
+  });
+  return out;
+}
+
+// 按字数分组：一组不超过 LLM_CHARS 字、LLM_ITEMS 条。大模型一组要好几秒，组小一点、多组同时翻更快
+function chunk(texts) {
+  var groups = [];
+  var g = null;
+  texts.forEach(function (t) {
+    if (!g || g.texts.length >= LLM_ITEMS || (g.texts.length && g.size + t.length > LLM_CHARS)) {
+      g = { texts: [], size: 0 };
+      groups.push(g);
+    }
+    g.texts.push(t);
+    g.size += t.length;
+  });
+  return groups;
+}
+
+function sleep(seconds) {
+  return new Promise(function (resolve) { setTimeout(resolve, Math.max(0, seconds * 1000)); });
+}
+
+// 大模型先翻，DeepL / Google 兜底。各组同时翻，runGroup(组) 返回 { 原文: 译文 }，大模型用不了返回 null。
+// 离截止还剩 FALLBACK_SECONDS 秒时，还没翻好的（包括正在翻的）交给 fallback 先翻一版，大模型用不了就马上交。
+// 大模型晚到的结果照样用。返回 { best: 大模型的译文, rough: 兜底的译文 }
+async function llmFirst(groups, runGroup, fallback) {
+  var best = {};
+  var rough = {};
+  var down = false;
+  var wake;
+  var woken = new Promise(function (resolve) { wake = resolve; });
+  var minLeft = Math.min(LLM_MIN_SECONDS, remaining() / 2);  // 限时很短时也至少翻第一批
+  var llmDone = parallel(groups, LLM_PARALLEL, async function (g) {
+    if (down) return;
+    var out = await runGroup(g);
+    if (!out) { down = true; wake(); return; }
+    Object.keys(out).forEach(function (t) { best[t] = out[t]; });
+  }, minLeft).then(wake);
+  if (fallback) {
+    await Promise.race([woken, sleep(remaining() - FALLBACK_SECONDS)]);
+    var left = [];
+    groups.forEach(function (g) { g.texts.forEach(function (t) { if (!(t in best)) left.push(t); }); });
+    if (left.length) {
+      log('大模型' + (down ? '用不了' : '还没翻完') + '，' + left.length + ' 段先用 DeepL / Google');
+      rough = await fallback(left);
+    }
+  }
+  await Promise.race([llmDone, sleep(remaining())]);  // 卡住的请求不等，到截止就用手上有的
+  log('大模型翻好 ' + Object.keys(best).length + ' 段，兜底 ' + Object.keys(rough).length + ' 段');
+  return { best: best, rough: rough };
+}
+
+// 兜底：缓存里有上次兜底的译文就直接用，剩下的交给 translate(texts) → Promise<{ 原文: 译文 }>
+function fallbackWith(rough, translate) {
+  if (!ARGS.keyList.length && ARGS.fallback !== 'google') return null;
+  return function (left) {
+    var out = {};
+    var need = left.filter(function (t) { if (rough[t]) out[t] = rough[t]; return !rough[t]; });
+    if (!need.length) return out;
+    return translate(need).then(function (map) { Object.keys(map).forEach(function (t) { out[t] = map[t]; }); return out; });
+  };
+}
+
+function redditPrompt() {
+  var lang = targetName();
+  return 'You translate Reddit posts and comments into ' + lang + '.\n'
+    + 'Input is JSON: "post" is the title of the post this content belongs to (may be empty, e.g. on a feed), '
+    + '"texts" holds titles and paragraphs keyed by number, in page order. Consecutive paragraphs usually come from the same post or comment.\n'
+    + 'Use the post title and neighbouring paragraphs to understand the context, Reddit slang, abbreviations and jokes. '
+    + 'Translate each text into natural ' + lang + ', the way a native speaker would write it. Keep the tone, emoji, '
+    + 'u/ and r/ names, links and line breaks. Translate every text separately: do not merge, split or skip any, and do not add explanations.\n'
+    + 'Reply with a JSON object mapping each text number to its translation, with exactly the same keys and nothing else.';
+}
+
+// 大模型的上下文：响应里只有一个帖子标题就是帖子页，记下来；好几个是信息流，不带；
+// 一个都没有（评论单独一个响应）就用刚才打开的帖子
+function postContext(jobs) {
+  var titles = jobs.filter(function (j) { return j.title; }).map(function (j) { return j.title.trim(); })
+    .filter(function (t, i, all) { return all.indexOf(t) === i; });
+  if (titles.length === 1) {
+    try { $persistentStore.write(JSON.stringify({ title: titles[0], at: now() }), POST_KEY); } catch (e) {}
+    return titles[0];
+  }
+  if (titles.length) return '';
+  try {
+    var last = JSON.parse($persistentStore.read(POST_KEY) || '{}');
+    return last.title && now() - last.at < POST_SECONDS ? last.title : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+// 用大模型翻：几段一组同时翻，带上帖子标题。返回 { best: 大模型的译文, rough: 兜底的译文 }
+function translateWithLlm(texts, state, rough, post) {
+  var system = redditPrompt();
+  log('用大模型翻 ' + texts.length + ' 段，帖子：' + (post || '无'));
+  return llmFirst(chunk(texts), function (g) {
+    return llmTranslate(system, { post: post }, 'texts', g.texts, state);
+  }, fallbackWith(rough, function (need) { return translate(need, state); }));
+}
+
 // ---------- 主流程 ----------
 
 async function main() {
@@ -484,9 +676,11 @@ async function main() {
   if (removed) log('删掉广告 ' + removed + ' 条');
   if (removed) adsRemoved = JSON.stringify(json);
 
-  var canTranslate = ARGS.translate !== 'off' && (ARGS.keyList.length || ARGS.fallback === 'google');
+  var useLlm = ARGS.llmKeyList.length > 0;
+  var canTranslate = ARGS.translate !== 'off' && (useLlm || ARGS.keyList.length || ARGS.fallback === 'google');
   var jobs = canTranslate ? collectJobs(json) : [];
   if (jobs.length) log('找到 ' + jobs.length + ' 处要看的文字');
+  var post = useLlm && jobs.length ? postContext(jobs) : '';
   var texts = [];
   jobs.forEach(function (j) {
     j.texts.forEach(function (t) { if (texts.indexOf(t) === -1 && needsTranslation(t)) texts.push(t); });
@@ -496,22 +690,32 @@ async function main() {
     var cache = loadCache();
     var known = {};
     cache.forEach(function (e) { known[e[0]] = e[1]; });
+    // 大模型的译文缓存时 key 前面加 LLM_TAG；不带的是 DeepL / Google 的，用大模型时只拿来兜底
     var map = {};
     var missing = [];
+    var rough = {};
     texts.forEach(function (t) {
-      var hit = known[cacheKey(t)];
+      var k = cacheKey(t);
+      var hit = known[(useLlm ? LLM_TAG : '') + k];
       if (hit) map[t] = hit;
       else missing.push(t);
+      if (!hit && useLlm && known[k]) rough[t] = known[k];
     });
     if (missing.length) {
       var state = loadState();
-      var fresh = await translate(missing, state);
+      var fresh = useLlm ? await translateWithLlm(missing, state, rough, post) : { best: {}, rough: await translate(missing, state) };
       saveState(state);
-      Object.keys(fresh).forEach(function (t) {
-        map[t] = fresh[t];
-        cache.unshift([cacheKey(t), fresh[t]]);
+      var added = 0;
+      Object.keys(fresh.rough).forEach(function (t) {
+        map[t] = fresh.rough[t];
+        if (!rough[t]) { cache.unshift([cacheKey(t), fresh.rough[t]]); added++; }
       });
-      if (Object.keys(fresh).length) saveCache(cache);
+      Object.keys(fresh.best).forEach(function (t) {
+        map[t] = fresh.best[t];
+        cache.unshift([LLM_TAG + cacheKey(t), fresh.best[t]]);
+        added++;
+      });
+      if (added) saveCache(cache);
     }
     var byNorm = {};
     texts.forEach(function (t) {

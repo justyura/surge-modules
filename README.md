@@ -11,8 +11,8 @@
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
-| YouTube 双语字幕 | YouTube 字幕和评论加 DeepL 翻译，多个 key 自动切换，可以标生词 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
-| Reddit 去广告和翻译 | Reddit App 的推广帖去掉，标题、正文、评论加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule` |
+| YouTube 双语字幕 | YouTube 字幕和评论加翻译，可以用 OpenAI 大模型结合上下文翻，也可以用 DeepL，多个 key 自动切换，可以标生词 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
+| Reddit 去广告和翻译 | Reddit App 的推广帖去掉，标题、正文、评论加翻译（大模型或 DeepL） | `https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule` |
 | Stack Overflow 翻译 | 第三方 Stack Overflow App（Octostack 等）里的标题、问题、回答、评论按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule` |
 | Stack Overflow 网页翻译 | Safari 里看 Stack Overflow 和其他 Stack Exchange 站点，同样按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow-web.sgmodule` |
 | GitHub 翻译 | GitHub 官方 App 里 Issue、PR、评论、README 按段加 DeepL 翻译 | `https://raw.githubusercontent.com/justyura/surge-modules/main/github.sgmodule` |
@@ -281,11 +281,11 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sg
 https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule
 ```
 
-YouTube 字幕下面加一行 DeepL 翻译，评论区的外文评论也一样。脚本是自己写的：`scripts/youtube-subtitles.js`。
+YouTube 字幕下面加一行翻译，评论区的外文评论也一样。可以用 OpenAI 大模型结合上下文翻，也可以只用 DeepL。脚本是自己写的：`scripts/youtube-subtitles.js`。
 
 ### 用法
 
-1. 装模块，在参数「DeepL密钥」里填 key，多个用 `|` 分隔，比如 `key1:fx|key2:fx|key3:fx`。
+1. 装模块，在参数「DeepL密钥」里填 key，多个用 `|` 分隔，比如 `key1:fx|key2:fx|key3:fx`。想用大模型翻，再在「大模型密钥」里填 OpenAI 的 key，见下面「大模型翻译」。
 2. 在 YouTube 里打开原文字幕（比如英文），就会变成双语。装了「App 去广告合集」并开着 `YouTube自动字幕` 的话，字幕会自动打开，不用手点。
 3. YouTube 自带的「自动翻译」字幕和本来就是中文的字幕不会再翻。
 
@@ -314,6 +314,26 @@ YouTube 字幕下面加一行 DeepL 翻译，评论区的外文评论也一样�
 - 状态里只存 key 的指纹，不存明文。
 - 打开「调试日志」可以在 Surge 日志里看到每次请求和 key 的切换。
 
+### 大模型翻译
+
+DeepL 和 Google 一句一句翻，看不到前后文：自动字幕一句话被切成好几行、没有标点、还有听错的词，翻出来经常是半句半句的；评论里的梗、人名也常翻错。填了「大模型密钥」就先用大模型翻，DeepL、Google 变成兜底。
+
+- **字幕**：按时间顺序分组，每组二十句左右，同时带上视频标题、频道名和前面 6 句。大模型看得懂整句话，能纠正自动字幕听错的词，人名、术语前后一致。每行译文还是对着自己那行，时间轴不乱。
+- **评论**：带上视频标题，几条一组同时翻，梗和人名能对上视频内容。点进去看回复时，用的是最近打开的那个视频的标题。
+- 视频标题用 YouTube 的 oEmbed 接口查（不用登录），最近 30 个视频的标题会记住。
+
+**来不及翻怎么办**：大模型比 DeepL 慢，一组要几秒，所以十几组一起发。离「最长等待」还剩 2.5 秒时，还没翻好的先交给 DeepL / Google 翻一版顶上，大模型在截止前回来的照样换成大模型的。兜底的译文单独缓存，下次打开字幕还会交给大模型重翻，大模型翻好之前先显示兜底的那版，不再花 DeepL 额度。大模型 key 全都用不了时马上换 DeepL，不等到截止。
+
+一两个小时的长视频，一次只能用大模型翻前面一部分（默认 8 秒大概几百句），后面先是 DeepL 的，关掉字幕再打开接着用大模型翻。YouTube 不报「加载字幕时出错」的话，可以把「最长等待」调到 15～20 秒，一次多翻一些。评论用大模型时最多等 6 秒。
+
+**模型和费用**：默认 `gpt-4.1-mini`，便宜、快，不用「思考」。按它每百万 token 输入 0.4 美元、输出 1.6 美元估算，一个 20 分钟的视频大约 0.01～0.02 美元，一页评论不到 0.01 美元。想更省可以填 `gpt-4.1-nano`，质量差一点。填 `gpt-5` 系列会自动关掉思考（gpt-5 / gpt-5-mini / gpt-5-nano 用 `minimal`，gpt-5.x 用 `none`，模型不认这个参数就去掉重试）。价格以 OpenAI 官网为准。
+
+**别家的接口**：「大模型接口」默认 `https://api.openai.com/v1`。DeepSeek、OpenRouter、自己部署的 One API 之类兼容 OpenAI Chat Completions 的接口都行，填它们的地址（到 `/v1` 为止），「大模型」填那家的模型名。要求接口支持 `response_format: {"type": "json_object"}`。
+
+大模型的 key 和 DeepL 一样：多个用 `|` 分隔，按顺序用，出错就换下一个。401 key 无效暂停 7 天，额度用完（429 `insufficient_quota`）暂停 24 小时，429 请求太多暂停 1 分钟，5xx 暂停 5 分钟。状态里只存 key 的指纹。
+
+大模型和 DeepL 的字幕缓存分开存，换了模型会重翻。
+
 ### 评论翻译
 
 打开评论区，外文评论的译文直接接在原文下面，往下翻、点进去看回复也一样。默认开着，参数「评论翻译」填 `#` 关掉。
@@ -323,7 +343,7 @@ YouTube 字幕下面加一行 DeepL 翻译，评论区的外文评论也一样�
 - 一页 20 条左右，一个 DeepL 请求翻完，每条单独识别语言，英文、日文、西班牙文混着也没问题。
 - 中文评论（目标语言是中文时）和纯表情不翻，不花额度。YouTube 给关键词加的搜索链接（「词⁠关联」）不送去翻。
 - 翻过的评论缓存最近 300 条，再打开不重复花额度。
-- 最多等 4 秒（比「最长等待」小就按它），翻不完先显示原文。DeepL、Google 都不行就是原评论，不影响评论区加载。
+- 最多等 4 秒（用大模型时 6 秒，比「最长等待」小就按它），翻不完先显示原文。大模型、DeepL、Google 都不行就是原评论，不影响评论区加载。
 - 评论只能接在原文下面，「原文位置」对评论不起作用：评论里的链接、@ 都按位置标在原文上，译文放前面会错位。
 
 和「App 去广告合集」一起装没问题。评论区走 `/youtubei/v1/next`，回复走 `/youtubei/v1/browse`，这两个接口的响应已经被去广告脚本占了（Surge 一个响应只跑一个脚本），所以评论翻译挂在请求阶段：认出评论请求后，脚本自己带上原来的请求头（登录状态也在里面）去 YouTube 拿评论，翻译好直接返回给 App；其他请求原样放行，去广告照常。代价是评论请求不经过去广告脚本，评论里本来也没有广告。
@@ -352,6 +372,9 @@ YouTube 字幕下面加一行 DeepL 翻译，评论区的外文评论也一样�
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
 | DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
+| 大模型密钥 | 占位文字 | OpenAI 的 key，用 `\|` 分隔；不填就只用 DeepL |
+| 大模型 | gpt-4.1-mini | 模型名 |
+| 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
 | 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
 | 原文位置 | top | top 原文在上；bottom 译文在上；only 只显示译文 |
 | 备用翻译 | google | off 表示不用 Google 兜底 |
@@ -364,7 +387,7 @@ YouTube 字幕下面加一行 DeepL 翻译，评论区的外文评论也一样�
 ### 其他
 
 - 支持 YouTube 的三种字幕格式：json3、srv3 / srv1 XML、WebVTT。自动生成字幕会把逐词的片段合成整句再翻。
-- 测试：`node tools/test_subtitles.js`，模拟 Surge 和 DeepL / Google / 生词服务接口，覆盖 key 切换、暂停、兜底、缓存、分批、三种字幕格式、标生词和评论翻译。
+- 测试：`node tools/test_subtitles.js`，模拟 Surge 和大模型 / DeepL / Google / 生词服务接口，覆盖 key 切换、暂停、兜底、缓存、分批、三种字幕格式、标生词、评论翻译，以及大模型的上下文、超时兜底和重翻。
 - DeepL 的条款是一人一个免费账号，多个免费账号轮着用超出额度违反条款，账号可能被封，自己把握。
 
 ## Reddit 去广告和翻译
@@ -387,19 +410,23 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
 
 - 标题的译文接在下面。帖子正文和评论按段对照：一段原文，下面紧跟这一段的译文，再下一段原文。
 - 中文段落和纯表情不翻。每段单独识别语言，一个响应一般一个 DeepL 请求翻完。翻过的缓存最近 500 段。
-- 最多等 4 秒（参数「最长等待」），没翻完的显示原文，广告照样去掉。评论多的帖子会拆成最多 6 个请求同时翻，一般几百条评论也能在限时内翻完；还是翻不完就把「最长等待」调大，或者退出帖子再点进去，翻过的走缓存，会接着翻后面的。
+- 填了「大模型密钥」就先用大模型翻，做法和 YouTube 一样（见上面「大模型翻译」）：几段一组同时翻，按页面顺序排，同一条帖子、评论的几段挨在一起；帖子页带上帖子标题，评论单独加载时用 10 分钟内最近打开的帖子标题，信息流不带。离截止还剩 2 秒没翻好的先用 DeepL / Google 顶上，兜底的下次再交给大模型重翻。
+- 最多等 6 秒（参数「最长等待」，以前默认 4 秒，用大模型时太短），没翻完的显示原文，广告照样去掉。评论多的帖子会拆成最多 6 个请求同时翻，一般几百条评论也能在限时内翻完；还是翻不完就把「最长等待」调大，或者退出帖子再点进去，翻过的走缓存，会接着翻后面的。
 - 评论多的帖子很费额度。只想看标题就把「翻译范围」改成 `title`，不想翻译改成 `off`。
-- DeepL key 可以和「YouTube 双语字幕」填一样的，哪个 key 被暂停两边共用。
+- DeepL key、大模型 key 都可以和「YouTube 双语字幕」填一样的，哪个 key 被暂停两边共用。
 
 ### 参数
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
 | DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
+| 大模型密钥 | 占位文字 | OpenAI 的 key，用 `\|` 分隔；不填就只用 DeepL |
+| 大模型 | gpt-4.1-mini | 模型名 |
+| 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
 | 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
 | 翻译范围 | all | all 标题、正文、评论都翻；title 只翻标题；off 只去广告 |
 | 备用翻译 | google | off 表示不用 Google 兜底 |
-| 最长等待 | 4 | 最多等几秒翻译 |
+| 最长等待 | 6 | 最多等几秒翻译 |
 | 调试日志 | false | true 打印删了几条广告、翻了几段 |
 
 ### 需要知道的
