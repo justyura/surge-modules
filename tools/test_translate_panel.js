@@ -47,12 +47,20 @@ function run(args, llm = {}) {
     assert.deepStrictEqual([calls[0].model, calls[0].effort, calls[0].format], ['gpt-6-luna', 'none', 'json_object']);
     assert.ok(calls[0].payload.video && calls[0].payload.before.length && calls[0].payload.after.length, '带视频标题和前后几句');
     assert.ok(calls[0].system.includes('Simplified Chinese'));
+    assert.ok(calls[0].system.includes('YouTube captions') && calls[0].system.includes('translate faithfully'), '用字幕的提示词，默认贴着原文');
     assert.strictEqual(panel.title, '翻译测试 · 正常');
     assert.ok(/^gpt-6-luna · 思考 none · \d+\.\d 秒$/m.test(panel.content), panel.content);
     assert.ok(panel.content.includes('思考 token 0'));
     assert.ok(panel.content.includes('译文：然后所有人都冲向银行'));
     assert.ok(!panel.content.includes('key 1'), '只有一个 key 时不单独列');
     console.log('ok  正常：gpt-6-luna 带 none，带上下文，显示用时和译文');
+  }
+
+  // 2b. 译法 natural 也传到面板
+  {
+    const { calls } = await run(`llmkeys=${L1}&style=natural`, { [L1]: { reply: GOOD } });
+    assert.ok(calls[0].system.includes('Free rephrasing'));
+    console.log('ok  面板按「YouTube译法」测');
   }
 
   // 3. 思考没关掉：提示改参数

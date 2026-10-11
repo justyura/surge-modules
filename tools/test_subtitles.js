@@ -594,5 +594,21 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  评论：大模型用不了时用以前 DeepL 的缓存，不再花 DeepL 额度');
   }
 
+  // 24. 译法：默认贴着原文翻（学英语对照），natural 可以意译；字幕和评论都按它，换了译法不用旧缓存
+  {
+    const r = await run({ url: URL_EN, body: json3(['so basically']), args: ARGS(K1, LLM()) });
+    const sys = llmCalls(r)[0].system;
+    assert.ok(sys.includes('translate faithfully, not freely') && sys.includes('tone') && sys.includes('technical terms'), '默认贴着原文');
+    assert.ok(!sys.includes('Free rephrasing'));
+    const r2 = await run({ url: URL_EN, body: json3(['so basically']), args: ARGS(K1, LLM() + '&style=natural'), store: r.store });
+    assert.strictEqual(llmCalls(r2).length, 1, '换了译法重新翻，不用旧缓存');
+    assert.ok(llmCalls(r2)[0].system.includes('Free rephrasing') && !llmCalls(r2)[0].system.includes('faithfully'));
+    const c = await runComments({ upstream: commentsPb(['Nice one']), extra: LLM() });
+    assert.ok(llmCalls(c)[0].system.includes('translate faithfully'), '评论也贴着原文');
+    const c2 = await runComments({ upstream: commentsPb(['Nice one']), store: c.store, extra: LLM() + '&style=natural' });
+    assert.ok(llmCalls(c2).length === 1 && llmCalls(c2)[0].system.includes('Free rephrasing'), '评论换了译法也重新翻');
+    console.log('ok  译法：默认贴着原文翻，natural 可以意译，字幕和评论都按它，缓存分开');
+  }
+
   console.log('全部通过');
 })().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

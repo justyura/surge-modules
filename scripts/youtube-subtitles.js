@@ -20,6 +20,7 @@
  *   keys      DeepL key，多个用 | 分隔
  *   llmkeys   大模型 key，多个用 | 分隔，出错的暂停规则和 DeepL 一样（401 当 403，额度用完当 456）
  *   model     模型名，默认 gpt-6-luna
+ *   style     大模型的译法：faithful 贴着原文翻（默认，对照着学外语），natural 更口语、可以意译
  *   effort    大模型思考档位：auto 按模型自动关掉思考，off 不带参数，或者 none、low、medium 这些
  *   api       接口地址，默认 https://api.openai.com/v1，DeepSeek 之类兼容 OpenAI 的接口也行
  *   target    目标语言，DeepL 的写法，比如 ZH-HANS、ZH-HANT、EN-US、JA
@@ -67,7 +68,7 @@ var VIDEO_CACHE = 30;            // 记住最近多少个视频的标题
 var PAUSE = { 403: 7 * 86400, 456: 86400, 429: 60, 5: 300 };
 
 function parseArgs(raw) {
-  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false', vocab: '', expand: 'true', llmkeys: '', model: '', api: '', effort: '' };
+  var args = { keys: '', target: 'ZH-HANS', position: 'top', fallback: 'google', budget: '8', debug: 'false', vocab: '', expand: 'true', llmkeys: '', model: '', api: '', effort: '', style: 'faithful' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -80,6 +81,7 @@ function parseArgs(raw) {
   args.budget = Math.min(50, Math.max(3, Number(args.budget) || 8));
   args.debug = args.debug === 'true';
   args.expand = args.expand !== 'false';
+  args.style = args.style === 'natural' ? 'natural' : 'faithful';
   args.vocab = /^https?:\/\/[^\s"]+$/i.test(args.vocab) ? args.vocab.replace(/\/+$/, '') : '';
   return parseLlmArgs(args);
 }
@@ -265,7 +267,8 @@ async function google(cues, result) {
 // 这一段是 scripts/lib/llm.js 同步过来的，几个翻译脚本里都一样。要改就改 scripts/lib/llm.js，
 // 再跑 python3 tools/sync_llm.py，别在脚本里直接改。
 //
-// 用到脚本自己定义的：ARGS（keyList、fallback、target，以及 parseLlmArgs 加上的 llmKeyList、model、api）、
+// 用到脚本自己定义的：ARGS（keyList、fallback、target，parseLlmArgs 加上的 llmKeyList、model、api、effort，
+// 字幕用的 styleRule / subtitlePrompt 还要 style）、
 // log、request、remaining、now、fingerprint、PAUSE、parallel(tasks, limit, run, minLeft)、loadState、saveState，
 // 常量 LLM_PARALLEL、LLM_CHARS、LLM_ITEMS、LLM_MIN_SECONDS、FALLBACK_SECONDS。
 // translateCached 默认还用 loadCache、saveCache、cacheKey 和 translate(texts, state)（DeepL + Google）。
@@ -545,12 +548,20 @@ function llmPrompt(what, extra) {
     + 'Reply with a JSON object mapping each text number to its translation, with exactly the same keys and nothing else.';
 }
 
-// 发过去的是简单 HTML（GitHub、Stack Overflow）时加上这句
-var HTML_RULE = 'Texts are small HTML snippets made of escaped text, <code>…</code> and <br>. Keep every <code> element '
-  + 'with its content unchanged, keep <br> where it is, keep HTML entities such as &lt; and &amp; escaped, '
-  + 'and translate only the text around them.';
-// ---------- 大模型结束 ----------
+// YouTube 字幕和评论的译法（参数 style）：faithful 贴着原文翻，对照着学外语；natural 更口语，可以意译
+function styleRule() {
+  var lang = targetName();
+  if (ARGS.style === 'natural') {
+    return 'Write natural, idiomatic ' + lang + ', the way a native speaker would say it. Free rephrasing is fine as long as the meaning is kept.';
+  }
+  return 'The viewer is learning the original language by reading it next to your translation, so translate faithfully, not freely: '
+    + 'follow the original\'s logic and order of ideas so each part can be matched to its words; keep the speaker\'s tone, register '
+    + 'and strength (casual, formal, joking, hedging, emphatic) without smoothing it over or embellishing; translate technical terms '
+    + 'and key phrases with their standard ' + lang + ' equivalents, the same way every time; do not add, drop, summarize or explain '
+    + 'anything. Still write grammatical, readable ' + lang + ': faithful, not word-for-word.';
+}
 
+// YouTube 字幕的提示词，测试面板也用它，面板测的就是字幕实际发出去的
 function subtitlePrompt() {
   var lang = targetName();
   return 'You translate YouTube captions into ' + lang + '.\n'
@@ -559,10 +570,17 @@ function subtitlePrompt() {
     + 'Captions are consecutive fragments of speech: one sentence often runs across several lines, and auto-generated captions '
     + 'have no punctuation and may mishear words. Read all lines together to understand what is being said, fix obvious mishearings, '
     + 'and keep names and terms consistent.\n'
-    + 'Translate every line into natural spoken ' + lang + '. Keep each translation aligned with its own line: do not move words '
-    + 'to another line, merge lines or leave any out. Keep names, brands and technical terms that are usually not translated.\n'
+    + 'Translate every line into ' + lang + '. ' + styleRule() + '\n'
+    + 'Keep each translation aligned with its own line: do not move words to another line, merge lines or leave any out. '
+    + 'Keep names, brands and technical terms that are usually not translated.\n'
     + 'Reply with a JSON object mapping each line number to its translation, with exactly the same keys and nothing else.';
 }
+
+// 发过去的是简单 HTML（GitHub、Stack Overflow）时加上这句
+var HTML_RULE = 'Texts are small HTML snippets made of escaped text, <code>…</code> and <br>. Keep every <code> element '
+  + 'with its content unchanged, keep <br> where it is, keep HTML entities such as &lt; and &amp; escaped, '
+  + 'and translate only the text around them.';
+// ---------- 大模型结束 ----------
 
 function commentPrompt() {
   var lang = targetName();
@@ -570,8 +588,8 @@ function commentPrompt() {
     + 'Input is JSON: "video" is the title and channel of the video they were posted under (may be empty), '
     + '"comments" holds the comments keyed by number. Each comment stands on its own, but they share the video\'s topic: '
     + 'use it to understand references, names, slang and jokes.\n'
-    + 'Translate each comment completely into natural ' + lang + ', the way a native speaker would write it. '
-    + 'Keep the tone, emoji, @mentions, timestamps, links and line breaks. Do not add explanations.\n'
+    + 'Translate each comment completely into ' + lang + '. ' + styleRule() + '\n'
+    + 'Keep the emoji, @mentions, timestamps, links and line breaks.\n'
     + 'Reply with a JSON object mapping each comment number to its translation, with exactly the same keys and nothing else.';
 }
 
@@ -1078,7 +1096,7 @@ async function translateCommentTexts(body, video) {
   arm(budget + 2);
   var map = await translateCached(todo, {
     system: commentPrompt(), context: { video: await video }, field: 'comments', chars: LLM_COMMENT_CHARS,
-    load: loadCommentCache, save: saveCommentCache, key: commentCacheKey, translate: translateComments,
+    load: loadCommentCache, save: saveCommentCache, key: function (t) { return ARGS.style + '#' + commentCacheKey(t); }, translate: translateComments,
   });
   log('翻好 ' + Object.keys(map).length + ' / ' + todo.length + ' 条');
 
@@ -1117,7 +1135,7 @@ function main() {
 
   var state = loadState();
   // 大模型和 DeepL 的译文分开缓存，换了模型也重翻
-  var cacheId = [param(url, 'v'), lang, param(url, 'kind'), ARGS.target].concat(useLlm ? [ARGS.model] : []).join('|');
+  var cacheId = [param(url, 'v'), lang, param(url, 'kind'), ARGS.target].concat(useLlm ? [ARGS.model, ARGS.style] : []).join('|');
   var entry = state.cache.filter(function (c) { return c.id === cacheId; })[0];
   var cached = entry ? entry.map : {};
   // DeepL 的源语言写法：en、ja → EN、JA；自动生成字幕的语言也能用

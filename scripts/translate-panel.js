@@ -1,7 +1,7 @@
 /*
  * 翻译合集的测试面板：点一下，用模块里填的大模型 key、模型、接口和「大模型思考」翻一小段字幕，
- * 显示每个 key 能不能用、用时、思考有没有关掉、译文。用的是和各个翻译脚本同一段大模型代码，
- * 面板上正常，字幕、评论那边发出去的请求也是一样的。
+ * 显示每个 key 能不能用、用时、思考有没有关掉、译文。用的是和各个翻译脚本同一段大模型代码和
+ * YouTube 字幕的提示词（含「YouTube译法」），面板上正常，字幕那边发出去的请求也是一样的。
  *
  * 测试的字幕是一句话被切成两行，单看第一行「rushed to the bank」分不清是银行还是河岸，
  * 要结合视频标题和前后几句才知道是银行：顺便看模型有没有用上上下文。
@@ -12,6 +12,7 @@
  *   llmkeys   大模型 key，多个用 | 分隔
  *   model     模型名，默认 gpt-6-luna
  *   api       接口地址，默认 https://api.openai.com/v1
+ *   style     YouTube 的译法：faithful 贴着原文翻，natural 可以意译
  *   effort    大模型思考档位：auto 按模型自动关掉思考，off 不带参数，或者 none、low、medium 这些
  *   target    目标语言，比如 ZH-HANS
  */
@@ -26,7 +27,7 @@ var BUDGET = 25;  // 秒，模块里脚本的 timeout 是 30
 var PAUSE = {};   // 面板只测试，不暂停 key
 
 function parseArgs(raw) {
-  var args = { llmkeys: '', model: '', api: '', effort: '', target: 'ZH-HANS' };
+  var args = { llmkeys: '', model: '', api: '', effort: '', style: 'faithful', target: 'ZH-HANS' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -35,6 +36,7 @@ function parseArgs(raw) {
     args[part.slice(0, i).trim()] = value.replace(/^"|"$/g, '').trim();
   });
   args.target = args.target.toUpperCase();
+  args.style = args.style === 'natural' ? 'natural' : 'faithful';
   args.keyList = [];
   args.fallback = 'off';
   return parseLlmArgs(args);
@@ -65,7 +67,8 @@ function request(method, options) {
 // 这一段是 scripts/lib/llm.js 同步过来的，几个翻译脚本里都一样。要改就改 scripts/lib/llm.js，
 // 再跑 python3 tools/sync_llm.py，别在脚本里直接改。
 //
-// 用到脚本自己定义的：ARGS（keyList、fallback、target，以及 parseLlmArgs 加上的 llmKeyList、model、api）、
+// 用到脚本自己定义的：ARGS（keyList、fallback、target，parseLlmArgs 加上的 llmKeyList、model、api、effort，
+// 字幕用的 styleRule / subtitlePrompt 还要 style）、
 // log、request、remaining、now、fingerprint、PAUSE、parallel(tasks, limit, run, minLeft)、loadState、saveState，
 // 常量 LLM_PARALLEL、LLM_CHARS、LLM_ITEMS、LLM_MIN_SECONDS、FALLBACK_SECONDS。
 // translateCached 默认还用 loadCache、saveCache、cacheKey 和 translate(texts, state)（DeepL + Google）。
@@ -345,21 +348,39 @@ function llmPrompt(what, extra) {
     + 'Reply with a JSON object mapping each text number to its translation, with exactly the same keys and nothing else.';
 }
 
+// YouTube 字幕和评论的译法（参数 style）：faithful 贴着原文翻，对照着学外语；natural 更口语，可以意译
+function styleRule() {
+  var lang = targetName();
+  if (ARGS.style === 'natural') {
+    return 'Write natural, idiomatic ' + lang + ', the way a native speaker would say it. Free rephrasing is fine as long as the meaning is kept.';
+  }
+  return 'The viewer is learning the original language by reading it next to your translation, so translate faithfully, not freely: '
+    + 'follow the original\'s logic and order of ideas so each part can be matched to its words; keep the speaker\'s tone, register '
+    + 'and strength (casual, formal, joking, hedging, emphatic) without smoothing it over or embellishing; translate technical terms '
+    + 'and key phrases with their standard ' + lang + ' equivalents, the same way every time; do not add, drop, summarize or explain '
+    + 'anything. Still write grammatical, readable ' + lang + ': faithful, not word-for-word.';
+}
+
+// YouTube 字幕的提示词，测试面板也用它，面板测的就是字幕实际发出去的
+function subtitlePrompt() {
+  var lang = targetName();
+  return 'You translate YouTube captions into ' + lang + '.\n'
+    + 'Input is JSON: "video" is the video title and channel (may be empty), "before" and "after" hold the captions right '
+    + 'before and after these (context only, do not translate them), "lines" holds the captions to translate, keyed by number.\n'
+    + 'Captions are consecutive fragments of speech: one sentence often runs across several lines, and auto-generated captions '
+    + 'have no punctuation and may mishear words. Read all lines together to understand what is being said, fix obvious mishearings, '
+    + 'and keep names and terms consistent.\n'
+    + 'Translate every line into ' + lang + '. ' + styleRule() + '\n'
+    + 'Keep each translation aligned with its own line: do not move words to another line, merge lines or leave any out. '
+    + 'Keep names, brands and technical terms that are usually not translated.\n'
+    + 'Reply with a JSON object mapping each line number to its translation, with exactly the same keys and nothing else.';
+}
+
 // 发过去的是简单 HTML（GitHub、Stack Overflow）时加上这句
 var HTML_RULE = 'Texts are small HTML snippets made of escaped text, <code>…</code> and <br>. Keep every <code> element '
   + 'with its content unchanged, keep <br> where it is, keep HTML entities such as &lt; and &amp; escaped, '
   + 'and translate only the text around them.';
 // ---------- 大模型结束 ----------
-
-function samplePrompt() {
-  var lang = targetName();
-  return 'You translate YouTube captions into ' + lang + '.\n'
-    + 'Input is JSON: "video" is the video title and channel, "before" and "after" hold the captions right before and after '
-    + 'these (context only, do not translate them), "lines" holds the captions to translate, keyed by number.\n'
-    + 'Captions are consecutive fragments of speech. Read them together, translate every line into natural spoken ' + lang
-    + ' and keep each translation aligned with its own line.\n'
-    + 'Reply with a JSON object mapping each line number to its translation, with exactly the same keys and nothing else.';
-}
 
 // 出错的原因，尽量说人话
 function reason(last) {
@@ -376,7 +397,7 @@ function reason(last) {
 async function testKey(key) {
   var payload = { video: SAMPLE.video, before: SAMPLE.before, after: SAMPLE.after, lines: { 1: SAMPLE.lines[0], 2: SAMPLE.lines[1] } };
   llmLast = null;
-  var r = await llmOnce(key, samplePrompt(), payload, reasoningEffort(ARGS.model));
+  var r = await llmOnce(key, subtitlePrompt(), payload, reasoningEffort(ARGS.model));
   var last = llmLast || { ms: 0, effort: '-', status: 0, body: '没有返回' };
   if (!r.ok) return { ok: false, last: last, why: reason(last) };
   var list = r.list || {};

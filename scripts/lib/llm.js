@@ -2,7 +2,8 @@
 // 这一段是 scripts/lib/llm.js 同步过来的，几个翻译脚本里都一样。要改就改 scripts/lib/llm.js，
 // 再跑 python3 tools/sync_llm.py，别在脚本里直接改。
 //
-// 用到脚本自己定义的：ARGS（keyList、fallback、target，以及 parseLlmArgs 加上的 llmKeyList、model、api）、
+// 用到脚本自己定义的：ARGS（keyList、fallback、target，parseLlmArgs 加上的 llmKeyList、model、api、effort，
+// 字幕用的 styleRule / subtitlePrompt 还要 style）、
 // log、request、remaining、now、fingerprint、PAUSE、parallel(tasks, limit, run, minLeft)、loadState、saveState，
 // 常量 LLM_PARALLEL、LLM_CHARS、LLM_ITEMS、LLM_MIN_SECONDS、FALLBACK_SECONDS。
 // translateCached 默认还用 loadCache、saveCache、cacheKey 和 translate(texts, state)（DeepL + Google）。
@@ -280,6 +281,34 @@ function llmPrompt(what, extra) {
     + 'names, @mentions, links and line breaks. Translate every text separately: do not merge, split or skip any, '
     + 'and do not add explanations.\n'
     + 'Reply with a JSON object mapping each text number to its translation, with exactly the same keys and nothing else.';
+}
+
+// YouTube 字幕和评论的译法（参数 style）：faithful 贴着原文翻，对照着学外语；natural 更口语，可以意译
+function styleRule() {
+  var lang = targetName();
+  if (ARGS.style === 'natural') {
+    return 'Write natural, idiomatic ' + lang + ', the way a native speaker would say it. Free rephrasing is fine as long as the meaning is kept.';
+  }
+  return 'The viewer is learning the original language by reading it next to your translation, so translate faithfully, not freely: '
+    + 'follow the original\'s logic and order of ideas so each part can be matched to its words; keep the speaker\'s tone, register '
+    + 'and strength (casual, formal, joking, hedging, emphatic) without smoothing it over or embellishing; translate technical terms '
+    + 'and key phrases with their standard ' + lang + ' equivalents, the same way every time; do not add, drop, summarize or explain '
+    + 'anything. Still write grammatical, readable ' + lang + ': faithful, not word-for-word.';
+}
+
+// YouTube 字幕的提示词，测试面板也用它，面板测的就是字幕实际发出去的
+function subtitlePrompt() {
+  var lang = targetName();
+  return 'You translate YouTube captions into ' + lang + '.\n'
+    + 'Input is JSON: "video" is the video title and channel (may be empty), "before" and "after" hold the captions right '
+    + 'before and after these (context only, do not translate them), "lines" holds the captions to translate, keyed by number.\n'
+    + 'Captions are consecutive fragments of speech: one sentence often runs across several lines, and auto-generated captions '
+    + 'have no punctuation and may mishear words. Read all lines together to understand what is being said, fix obvious mishearings, '
+    + 'and keep names and terms consistent.\n'
+    + 'Translate every line into ' + lang + '. ' + styleRule() + '\n'
+    + 'Keep each translation aligned with its own line: do not move words to another line, merge lines or leave any out. '
+    + 'Keep names, brands and technical terms that are usually not translated.\n'
+    + 'Reply with a JSON object mapping each line number to its translation, with exactly the same keys and nothing else.';
 }
 
 // 发过去的是简单 HTML（GitHub、Stack Overflow）时加上这句
