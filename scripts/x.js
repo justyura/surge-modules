@@ -497,7 +497,7 @@ async function google(texts, result) {
 
 // DeepL 用不了的原因，写进日志
 function deeplProblem(state) {
-  if (!ARGS.keyList.length) return '没填 DeepL 密钥（每个模块的参数是分开的，这个模块里也要填）';
+  if (!ARGS.keyList.length) return '没填 DeepL 密钥';
   var until = ARGS.keyList.map(function (k) { return state.paused[fingerprint(k)] || 0; });
   if (until.some(function (t) { return t <= now(); })) return '';
   var first = new Date(Math.min.apply(null, until) * 1000);

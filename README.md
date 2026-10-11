@@ -11,13 +11,7 @@
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
 | 搜索引擎重定向 | 用 Google、Kagi、DuckDuckGo 等搜索时直接跳到自建搜索引擎 | `https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sgmodule` |
-| 翻译合集 | 下面所有翻译模块合在一起，只填一个 OpenAI key：大模型结合上下文翻，DeepL / Google 兜底，每个站点可以单独关 | `https://raw.githubusercontent.com/justyura/surge-modules/main/translate.sgmodule` |
-| YouTube 双语字幕 | YouTube 字幕和评论加翻译，可以用 OpenAI 大模型结合上下文翻，也可以用 DeepL，多个 key 自动切换，可以标生词 | `https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule` |
-| Reddit 去广告和翻译 | Reddit App 的推广帖去掉，标题、正文、评论加翻译（大模型或 DeepL） | `https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule` |
-| Stack Overflow 翻译 | 第三方 Stack Overflow App（Octostack 等）里的标题、问题、回答、评论按段加翻译（大模型或 DeepL） | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule` |
-| Stack Overflow 网页翻译 | Safari 里看 Stack Overflow 和其他 Stack Exchange 站点，同样按段加翻译（大模型或 DeepL） | `https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow-web.sgmodule` |
-| GitHub 翻译 | GitHub 官方 App 里 Issue、PR、评论、README 按段加翻译（大模型或 DeepL） | `https://raw.githubusercontent.com/justyura/surge-modules/main/github.sgmodule` |
-| X 去广告、屏蔽中文和翻译 | X App 和 Safari 里的 x.com，时间线、推文详情、搜索、趋势里的推广和中文推文删掉，外文推文加 翻译（大模型或 DeepL） | `https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule` |
+| 翻译合集 | YouTube 字幕和评论、Reddit、X、GitHub、Stack Overflow 的翻译，只填一个 OpenAI key：大模型结合上下文翻，DeepL / Google 兜底，每个站点可以单独关；Reddit、X 顺带去推广，X 可以屏蔽中文推文 | `https://raw.githubusercontent.com/justyura/surge-modules/main/translate.sgmodule` |
 
 ## 代理流量面板
 
@@ -156,7 +150,7 @@ YouTube 有四个开关，默认都是 `true`，不想要就改成 `false`：
 - `YouTube隐藏Shorts`：底部的 Shorts 标签，首页、搜索、播放页推荐里的 Shorts 栏
 - `YouTube隐藏游戏`：首页里的 Playables 小游戏
 - `YouTube隐藏竖屏直播`：推荐里的竖屏直播
-- `YouTube自动字幕`：打开视频就自动开字幕。视频有原语言的人工字幕就用它，没有就用自动生成的。和「YouTube 双语字幕」一起装，打开视频直接是双语
+- `YouTube自动字幕`：打开视频就自动开字幕。视频有原语言的人工字幕就用它，没有就用自动生成的。和「翻译合集」一起装，打开视频直接是双语
 
 自动字幕是改的 YouTube 返回的「这个视频默认开不开字幕」，和 YouTube 给日语用户看英文视频时自动开日文字幕是同一个开关。你在某个视频里手动关了字幕，App 会记住，之后可能不再自动开，到播放器里再打开一次就好。
 
@@ -282,14 +276,14 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/search-redirect.sg
 https://raw.githubusercontent.com/justyura/surge-modules/main/translate.sgmodule
 ```
 
-YouTube 字幕和评论、Reddit、X、GitHub、Stack Overflow（App 和 Safari）的翻译合成一个模块，**只用填一个 OpenAI key**。和下面几个单独的模块用的是同一套脚本，效果一样，只是参数共用一份。
+YouTube 字幕和评论、Reddit、X、GitHub、Stack Overflow（App 和 Safari）的翻译都在这一个模块里，**只用填一个 OpenAI key**。先用大模型结合上下文翻，DeepL / Google 兜底。Reddit 和 X 顺带去推广，X 还能屏蔽中文推文。脚本都是自己写的，在 `scripts/` 里。
 
 ### 用法
 
-1. 先把单独装的翻译模块（YouTube 双语字幕、Reddit、X、GitHub、Stack Overflow 那几个）卸掉，同一个请求不能被两个模块处理。
-2. 装合集，参数「大模型密钥」填 OpenAI 的 key，多个用 `|` 分隔。
-3. 「DeepL密钥」可以不填：大模型来不及或用不了时直接用 Google 兜底；填了就先用 DeepL 兜底，再用 Google。
-4. 哪个站点不用，就把它的开关参数（YouTube字幕、YouTube评论、Reddit、X、GitHub、StackOverflow、StackOverflow网页）改成 `#`。
+1. 装模块，参数「大模型密钥」填 OpenAI 的 key，多个用 `|` 分隔。
+2. 「DeepL密钥」可以不填：大模型来不及或用不了时直接用 Google 兜底；填了就先用 DeepL 兜底，再用 Google。
+3. 哪个站点不用，就把它的开关参数改成 `#`：YouTube字幕、YouTube评论、Reddit、X、GitHub、StackOverflow、StackOverflow网页。
+4. 以前装过单独的「YouTube 双语字幕」「Reddit 去广告和翻译」「X 去广告、屏蔽中文和翻译」「GitHub 翻译」「Stack Overflow 翻译」「Stack Overflow 网页翻译」的，先卸掉，同一个请求不能被两个模块处理。这几个单独的模块已经不再更新。
 
 ### 参数
 
@@ -301,27 +295,44 @@ YouTube 字幕和评论、Reddit、X、GitHub、Stack Overflow（App 和 Safari�
 | 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
 | 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
 | 备用翻译 | google | off 表示不用 Google 兜底 |
+| 最长等待 | 6 | Reddit、X、GitHub、Stack Overflow App 最多等几秒翻译 |
 | 调试日志 | false | true 打印详细日志 |
-| 各站点开关 | 脚本名 | 填 `#` 关掉这个站点 |
+| YouTube字幕 … StackOverflow网页 | 脚本名 | 七个站点开关，填 `#` 关掉 |
 | 字幕原文位置 | top | YouTube 字幕：top 原文在上；bottom 译文在上；only 只显示译文 |
-| 字幕最长等待 | 8 | YouTube 字幕最多等几秒 |
-| 生词服务 | 占位文字 | 见「YouTube 双语字幕 → 标生词」 |
-| 评论展开 | true | YouTube 长评论直接显示全文 |
-| X屏蔽中文 | true | false 只去广告和翻译，不删中文推文 |
-| X白名单 | 占位文字 | 不删这些账号的推文 |
+| 字幕最长等待 | 8 | YouTube 字幕最多等几秒，到时间先显示翻好的部分 |
+| 生词服务 | 占位文字 | 自己的 vox 生词服务地址，见下面「标生词」；不填就不标 |
+| 评论展开 | true | YouTube 长评论直接显示全文；false 保持要点「展开」 |
+| Reddit翻译范围 | all | all 标题、正文、评论都翻；title 只翻标题；off 只去广告 |
+| X屏蔽中文 | true | false 只去广告和翻译 |
+| X中文判定 | normal | normal 只看正文；strict 再看引用、作者名字和简介 |
+| X白名单 | 占位文字 | 不删的账号，填 @ 后面的用户名，多个用 `\|` 分隔 |
+| X翻译 | all | off 不翻译，只去广告和屏蔽中文 |
+| GitHub翻译范围 | all | all 全翻；title 只翻标题和仓库简介；off 不翻 |
+| GitHub改markdown | false | true 时 markdown 原文也插译文，见下面 GitHub 一节 |
+| StackOverflow翻译范围 | all | App 和网页都按这个：all 全翻；post 不翻评论；title 只翻标题；off 不翻 |
+| StackOverflow最多回答 | 10 | App 一次最多翻几个回答，0 不限 |
 
-其他参数用各个单独模块的默认值：Reddit、X 最多等 6 秒，GitHub、Stack Overflow 最多等 8 秒，翻译范围都是全翻，Stack Overflow 最多翻 10 个回答，GitHub 不改 markdown 原文。要改这些就装单独的模块。
+站点开关填 `#` 只是不跑那个脚本，MITM 的域名还在。
 
-### 需要知道的
+### 大模型翻译
 
-- 站点开关填 `#` 只是不跑那个脚本，MITM 的域名还在。完全不想解密某个站点，就别用合集，装需要的单独模块。
-- 合集是从几个单独模块生成的：`python3 tools/build_translate.py`。改了单独模块（脚本地址、匹配规则、参数）要重新生成，`translate.sgmodule` 不要手改。
+DeepL 和 Google 一句一句翻，看不到前后文：自动字幕一句话被切成好几行、没有标点、还有听错的词，翻出来经常是半句半句的；评论里的梗、人名也常翻错。所以先用大模型翻，DeepL、Google 变成兜底。
 
-### 每个站点怎么带上下文
+- **YouTube 字幕**：按时间顺序分组，每组二十句左右，同时带上视频标题、频道名和前面 6 句。大模型看得懂整句话，能纠正自动字幕听错的词，人名、术语前后一致。每行译文还是对着自己那行，时间轴不乱。
+- **YouTube 评论**：带上视频标题，几条一组同时翻，梗和人名能对上视频内容。点进去看回复时，用的是最近打开的那个视频的标题。
+- 视频标题用 YouTube 的 oEmbed 接口查（不用登录），最近 30 个视频的标题会记住。
 
-大模型能翻得比 DeepL 好，主要是因为能看到上下文。每个站点发给它的除了要翻的段落，还有：
+**来不及翻怎么办**：大模型比 DeepL 慢，一组要几秒，所以十几组一起发。离「字幕最长等待」还剩 2.5 秒时（其他站点是「最长等待」前 2 秒），还没翻好的先交给 DeepL / Google 翻一版顶上，大模型在截止前回来的照样换成大模型的。兜底的译文单独缓存，下次打开字幕还会交给大模型重翻，大模型翻好之前先显示兜底的那版，不再花 DeepL 额度。大模型 key 全都用不了时马上换 DeepL，不等到截止。
 
-| 站点 | 一起发过去的上下文 |
+一两个小时的长视频，一次只能用大模型翻前面一部分（默认 8 秒大概几百句），后面先是 DeepL 的，关掉字幕再打开接着用大模型翻。YouTube 不报「加载字幕时出错」的话，可以把「字幕最长等待」调到 15～20 秒，一次多翻一些。评论用大模型时最多等 6 秒。
+
+**模型和费用**：默认 `gpt-4.1-mini`，便宜、快，不用「思考」。按它每百万 token 输入 0.4 美元、输出 1.6 美元估算，一个 20 分钟的视频大约 0.01～0.02 美元，一页评论不到 0.01 美元。想更省可以填 `gpt-4.1-nano`，质量差一点。填 `gpt-5` 系列会自动关掉思考（gpt-5 / gpt-5-mini / gpt-5-nano 用 `minimal`，gpt-5.x 用 `none`，模型不认这个参数就去掉重试）。价格以 OpenAI 官网为准。
+
+**别家的接口**：「大模型接口」默认 `https://api.openai.com/v1`。DeepSeek、OpenRouter、自己部署的 One API 之类兼容 OpenAI Chat Completions 的接口都行，填它们的地址（到 `/v1` 为止），「大模型」填那家的模型名。要求接口支持 `response_format: {"type": "json_object"}`。
+
+### 每个站点带什么上下文
+
+| 站点 | 除了要翻的段落，一起发过去的 |
 | --- | --- |
 | YouTube 字幕 | 视频标题和频道名，每组前面 6 句字幕 |
 | YouTube 评论 | 视频标题和频道名（回复用最近打开的视频） |
@@ -333,84 +344,39 @@ YouTube 字幕和评论、Reddit、X、GitHub、Stack Overflow（App 和 Safari�
 
 GitHub 和 Stack Overflow 发过去的是简单 HTML，提示词里要求 `<code>` 里的内容、`<br>` 和转义字符原样保留，代码、命令、报错不翻。
 
-几个站点的大模型代码是同一份：改 `scripts/lib/llm.js`，再跑 `python3 tools/sync_llm.py` 同步进各个脚本（Surge 脚本不能互相引用，只能各放一份）。
-
-## YouTube 双语字幕
-
-```
-https://raw.githubusercontent.com/justyura/surge-modules/main/youtube-subtitles.sgmodule
-```
-
-YouTube 字幕下面加一行翻译，评论区的外文评论也一样。可以用 OpenAI 大模型结合上下文翻，也可以只用 DeepL。脚本是自己写的：`scripts/youtube-subtitles.js`。
-
-### 用法
-
-1. 装模块，在参数「DeepL密钥」里填 key，多个用 `|` 分隔，比如 `key1:fx|key2:fx|key3:fx`。想用大模型翻，再在「大模型密钥」里填 OpenAI 的 key，见下面「大模型翻译」。
-2. 在 YouTube 里打开原文字幕（比如英文），就会变成双语。装了「App 去广告合集」并开着 `YouTube自动字幕` 的话，字幕会自动打开，不用手点。
-3. YouTube 自带的「自动翻译」字幕和本来就是中文的字幕不会再翻。
+大模型的译文和 DeepL / Google 的分开缓存。兜底的那版下次还会交给大模型重翻；YouTube 字幕换了模型也会重翻。
 
 ### 多个 key 怎么切换
 
-按填写顺序用，上次成功的 key 优先。某个 key 出错就马上换下一个，并按错误暂停它：
+大模型 key 和 DeepL key 都一样：按填写顺序用，上次成功的 key 优先。某个 key 出错就马上换下一个，并按错误暂停它：
 
 | 情况 | 暂停多久 |
 | --- | --- |
-| 403 key 无效 | 7 天 |
-| 456 额度用完 | 24 小时后再试 |
+| key 无效（大模型 401、DeepL 403） | 7 天 |
+| 额度用完（大模型 429 `insufficient_quota`、DeepL 456） | 24 小时后再试 |
 | 429 请求太多 | 1 分钟 |
 | 5xx 服务器出错 | 5 分钟 |
 | 网络错误 | 不暂停，直接换下一个 |
 
-所有 key 都不能用时，默认用 Google 翻译兜底；Google 也不行就保持原字幕，不影响播放。
-
-长视频（比如一两个小时的播客）有几千句字幕：
-- 几十句打包成一段发给 DeepL，一次请求能翻上千句，3 个请求同时跑，一般几秒内翻完。
-- 超过「最长等待」（默认 8 秒）就先返回翻好的部分，没翻完的显示原文；翻好的会缓存，关掉字幕再打开会接着翻。
-- 任何情况下超时 3 秒以上都会原样返回字幕，不会让 YouTube 报「加载字幕时出错」。
+大模型 key 全都不能用时马上换 DeepL；DeepL 也不行默认用 Google 兜底；都不行就显示原文，不影响 App 加载。
 
 另外：
 - 以 `:fx` 结尾的 Free key 走 `api-free.deepl.com`，其他当 Pro key 走 `api.deepl.com`。
-- 同一个视频的翻译会缓存（最近 3 个视频），拖进度条、重新打开字幕不重复花额度。
 - 状态里只存 key 的指纹，不存明文。
+- 几个站点共用 key 的暂停状态：某个 key 在 YouTube 上额度用完了，Reddit 那边也知道。
 - 打开「调试日志」可以在 Surge 日志里看到每次请求和 key 的切换。
 
-### 大模型翻译
+### YouTube 字幕
 
-DeepL 和 Google 一句一句翻，看不到前后文：自动字幕一句话被切成好几行、没有标点、还有听错的词，翻出来经常是半句半句的；评论里的梗、人名也常翻错。填了「大模型密钥」就先用大模型翻，DeepL、Google 变成兜底。
+在 YouTube 里打开原文字幕（比如英文），就会变成双语。装了「App 去广告合集」并开着 `YouTube自动字幕` 的话，字幕会自动打开，不用手点。YouTube 自带的「自动翻译」字幕和本来就是中文的字幕不会再翻。
 
-- **字幕**：按时间顺序分组，每组二十句左右，同时带上视频标题、频道名和前面 6 句。大模型看得懂整句话，能纠正自动字幕听错的词，人名、术语前后一致。每行译文还是对着自己那行，时间轴不乱。
-- **评论**：带上视频标题，几条一组同时翻，梗和人名能对上视频内容。点进去看回复时，用的是最近打开的那个视频的标题。
-- 视频标题用 YouTube 的 oEmbed 接口查（不用登录），最近 30 个视频的标题会记住。
+- 同一个视频的翻译会缓存（最近 3 个视频），拖进度条、重新打开字幕不重复花额度。
+- 超过「字幕最长等待」（默认 8 秒）就先返回翻好的部分，没翻完的显示原文；关掉字幕再打开会接着翻。任何情况下超时 3 秒以上都会原样返回字幕，不会让 YouTube 报「加载字幕时出错」。
+- 只用 DeepL 时，几十句打包成一段发过去，一次请求能翻上千句，几秒内翻完。
+- 支持 YouTube 的三种字幕格式：json3、srv3 / srv1 XML、WebVTT。自动生成字幕会把逐词的片段合成整句再翻。
+- DeepL 的条款是一人一个免费账号，多个免费账号轮着用超出额度违反条款，账号可能被封，自己把握。
 
-**来不及翻怎么办**：大模型比 DeepL 慢，一组要几秒，所以十几组一起发。离「最长等待」还剩 2.5 秒时，还没翻好的先交给 DeepL / Google 翻一版顶上，大模型在截止前回来的照样换成大模型的。兜底的译文单独缓存，下次打开字幕还会交给大模型重翻，大模型翻好之前先显示兜底的那版，不再花 DeepL 额度。大模型 key 全都用不了时马上换 DeepL，不等到截止。
-
-一两个小时的长视频，一次只能用大模型翻前面一部分（默认 8 秒大概几百句），后面先是 DeepL 的，关掉字幕再打开接着用大模型翻。YouTube 不报「加载字幕时出错」的话，可以把「最长等待」调到 15～20 秒，一次多翻一些。评论用大模型时最多等 6 秒。
-
-**模型和费用**：默认 `gpt-4.1-mini`，便宜、快，不用「思考」。按它每百万 token 输入 0.4 美元、输出 1.6 美元估算，一个 20 分钟的视频大约 0.01～0.02 美元，一页评论不到 0.01 美元。想更省可以填 `gpt-4.1-nano`，质量差一点。填 `gpt-5` 系列会自动关掉思考（gpt-5 / gpt-5-mini / gpt-5-nano 用 `minimal`，gpt-5.x 用 `none`，模型不认这个参数就去掉重试）。价格以 OpenAI 官网为准。
-
-**别家的接口**：「大模型接口」默认 `https://api.openai.com/v1`。DeepSeek、OpenRouter、自己部署的 One API 之类兼容 OpenAI Chat Completions 的接口都行，填它们的地址（到 `/v1` 为止），「大模型」填那家的模型名。要求接口支持 `response_format: {"type": "json_object"}`。
-
-大模型的 key 和 DeepL 一样：多个用 `|` 分隔，按顺序用，出错就换下一个。401 key 无效暂停 7 天，额度用完（429 `insufficient_quota`）暂停 24 小时，429 请求太多暂停 1 分钟，5xx 暂停 5 分钟。状态里只存 key 的指纹。
-
-大模型和 DeepL 的字幕缓存分开存，换了模型会重翻。
-
-### 评论翻译
-
-打开评论区，外文评论的译文直接接在原文下面，往下翻、点进去看回复也一样。默认开着，参数「评论翻译」填 `#` 关掉。
-
-长评论默认直接显示全文，不用点「展开」。不想要就把参数「评论展开」改成 `false`。
-
-- 一页 20 条左右，一个 DeepL 请求翻完，每条单独识别语言，英文、日文、西班牙文混着也没问题。
-- 中文评论（目标语言是中文时）和纯表情不翻，不花额度。YouTube 给关键词加的搜索链接（「词⁠关联」）不送去翻。
-- 翻过的评论缓存最近 300 条，再打开不重复花额度。
-- 最多等 4 秒（用大模型时 6 秒，比「最长等待」小就按它），翻不完先显示原文。大模型、DeepL、Google 都不行就是原评论，不影响评论区加载。
-- 评论只能接在原文下面，「原文位置」对评论不起作用：评论里的链接、@ 都按位置标在原文上，译文放前面会错位。
-
-和「App 去广告合集」一起装没问题。评论区走 `/youtubei/v1/next`，回复走 `/youtubei/v1/browse`，这两个接口的响应已经被去广告脚本占了（Surge 一个响应只跑一个脚本），所以评论翻译挂在请求阶段：认出评论请求后，脚本自己带上原来的请求头（登录状态也在里面）去 YouTube 拿评论，翻译好直接返回给 App；其他请求原样放行，去广告照常。代价是评论请求不经过去广告脚本，评论里本来也没有广告。
-
-评论区的 App 端格式是 protobuf，字段位置是对着 iOS 客户端的真实响应找出来的。YouTube 改了格式的话，评论会原样显示，不会出错。
-
-### 标生词
+#### 标生词
 
 接的是自己的 [vox](https://github.com/justyura/vox) 里的 `05_vocabularyService`（ECDICT 词典，`POST /v1/extract`）。在参数「生词服务」里填它的地址，比如 `http://192.168.1.2:8090`。
 
@@ -423,42 +389,31 @@ DeepL 和 Google 一句一句翻，看不到前后文：自动字幕一句话被
   ephemeral 朝生暮死的 · quantify 定量
   ```
 
-- 不用 DeepL、只想标生词也行：「DeepL密钥」不填，「备用翻译」填 off。
+- 只想标生词、不翻译也行：「大模型密钥」「DeepL密钥」都不填，「备用翻译」填 off。
 - 服务最多等 4 秒，连不上就只显示翻译，不影响字幕。同一个视频的生词会缓存。
 - 手机要能连到这个地址：在家用局域网 IP；在外面要么把服务放到公网（建议加 HTTPS），要么在 Surge 里配 WireGuard 连回家。iPhone 同时只能开一个 VPN，Surge 开着时 Tailscale 用不了。
 
-### 参数
+### YouTube 评论
 
-| 参数 | 默认 | 说明 |
-| --- | --- | --- |
-| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
-| 大模型密钥 | 占位文字 | OpenAI 的 key，用 `\|` 分隔；不填就只用 DeepL |
-| 大模型 | gpt-4.1-mini | 模型名 |
-| 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
-| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
-| 原文位置 | top | top 原文在上；bottom 译文在上；only 只显示译文 |
-| 备用翻译 | google | off 表示不用 Google 兜底 |
-| 最长等待 | 8 | 最多等几秒，到时间先显示翻好的部分 |
-| 生词服务 | 占位文字 | 自己的 vox 生词服务地址，比如 `http://192.168.1.2:8090`；不填就不标生词 |
-| 评论翻译 | 评论翻译 | 填 `#` 关掉评论翻译 |
-| 评论展开 | true | 长评论直接显示全文；false 保持要点「展开」 |
-| 调试日志 | false | true 打印详细日志 |
+打开评论区，外文评论的译文直接接在原文下面，往下翻、点进去看回复也一样。默认开着，参数「YouTube评论」填 `#` 关掉。
 
-### 其他
+长评论默认直接显示全文，不用点「展开」。不想要就把参数「评论展开」改成 `false`。
 
-- 支持 YouTube 的三种字幕格式：json3、srv3 / srv1 XML、WebVTT。自动生成字幕会把逐词的片段合成整句再翻。
-- 测试：`node tools/test_subtitles.js`，模拟 Surge 和大模型 / DeepL / Google / 生词服务接口，覆盖 key 切换、暂停、兜底、缓存、分批、三种字幕格式、标生词、评论翻译，以及大模型的上下文、超时兜底和重翻。
-- DeepL 的条款是一人一个免费账号，多个免费账号轮着用超出额度违反条款，账号可能被封，自己把握。
+- 一页 20 条左右，每条单独识别语言，英文、日文、西班牙文混着也没问题。
+- 中文评论（目标语言是中文时）和纯表情不翻，不花额度。YouTube 给关键词加的搜索链接（「词⁠关联」）不送去翻。
+- 翻过的评论缓存最近 300 条，再打开不重复花额度。
+- 最多等 4 秒（用大模型时 6 秒，比「字幕最长等待」小就按它），翻不完先显示原文。大模型、DeepL、Google 都不行就是原评论，不影响评论区加载。
+- 评论只能接在原文下面，「字幕原文位置」对评论不起作用：评论里的链接、@ 都按位置标在原文上，译文放前面会错位。
 
-## Reddit 去广告和翻译
+和「App 去广告合集」一起装没问题。评论区走 `/youtubei/v1/next`，回复走 `/youtubei/v1/browse`，这两个接口的响应已经被去广告脚本占了（Surge 一个响应只跑一个脚本），所以评论翻译挂在请求阶段：认出评论请求后，脚本自己带上原来的请求头（登录状态也在里面）去 YouTube 拿评论，翻译好直接返回给 App；其他请求原样放行，去广告照常。代价是评论请求不经过去广告脚本，评论里本来也没有广告。
 
-```
-https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
-```
+评论区的 App 端格式是 protobuf，字段位置是对着 iOS 客户端的真实响应找出来的。YouTube 改了格式的话，评论会原样显示，不会出错。
 
-给 Reddit 官方 App 用的，处理 App 的 GraphQL 接口（`gql.reddit.com`、`gql-fed.reddit.com`）和 REST 接口（`oauth.reddit.com`），要开 MITM。Safari 里的 reddit.com 由「网页弹窗和广告拦截」管。脚本是自己写的：`scripts/reddit.js`。
+### Reddit
 
-### 去广告
+给 Reddit 官方 App 用的，处理 App 的 GraphQL 接口（`gql.reddit.com`、`gql-fed.reddit.com`）和 REST 接口（`oauth.reddit.com`）。Safari 里的 reddit.com 由「网页弹窗和广告拦截」管。脚本：`scripts/reddit.js`。
+
+去广告：
 
 - 首页、版块、搜索信息流里的推广帖（`AdPost`、带广告标记的卡片）
 - 帖子页正文下面、评论中间插的广告
@@ -466,30 +421,15 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
 
 不放进「App 去广告合集」：Surge 一个响应只跑一个脚本，去广告和翻译得在同一个脚本里。
 
-### 翻译
+翻译：
 
 - 标题的译文接在下面。帖子正文和评论按段对照：一段原文，下面紧跟这一段的译文，再下一段原文。
-- 中文段落和纯表情不翻。每段单独识别语言，一个响应一般一个 DeepL 请求翻完。翻过的缓存最近 500 段。
-- 填了「大模型密钥」就先用大模型翻，做法和 YouTube 一样（见上面「大模型翻译」）：几段一组同时翻，按页面顺序排，同一条帖子、评论的几段挨在一起；帖子页带上帖子标题，评论单独加载时用 10 分钟内最近打开的帖子标题，信息流不带。离截止还剩 2 秒没翻好的先用 DeepL / Google 顶上，兜底的下次再交给大模型重翻。
-- 最多等 6 秒（参数「最长等待」，以前默认 4 秒，用大模型时太短），没翻完的显示原文，广告照样去掉。评论多的帖子会拆成最多 6 个请求同时翻，一般几百条评论也能在限时内翻完；还是翻不完就把「最长等待」调大，或者退出帖子再点进去，翻过的走缓存，会接着翻后面的。
-- 评论多的帖子很费额度。只想看标题就把「翻译范围」改成 `title`，不想翻译改成 `off`。
-- DeepL key、大模型 key 都可以和「YouTube 双语字幕」填一样的，哪个 key 被暂停两边共用。
+- 中文段落和纯表情不翻。每段单独识别语言。翻过的缓存最近 500 段。
+- 大模型几段一组同时翻，按页面顺序排，同一条帖子、评论的几段挨在一起；帖子页带上帖子标题，评论单独加载时用 10 分钟内最近打开的帖子标题，信息流不带。
+- 最多等 6 秒（参数「最长等待」），没翻完的显示原文，广告照样去掉。评论多的帖子拆成好几组同时翻；还是翻不完就把「最长等待」调大，或者退出帖子再点进去，翻过的走缓存，会接着翻后面的。
+- 评论多的帖子很费额度。只想看标题就把「Reddit翻译范围」改成 `title`，不想翻译改成 `off`。
 
-### 参数
-
-| 参数 | 默认 | 说明 |
-| --- | --- | --- |
-| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
-| 大模型密钥 | 占位文字 | OpenAI 的 key，用 `\|` 分隔；不填就只用 DeepL |
-| 大模型 | gpt-4.1-mini | 模型名 |
-| 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
-| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
-| 翻译范围 | all | all 标题、正文、评论都翻；title 只翻标题；off 只去广告 |
-| 备用翻译 | google | off 表示不用 Google 兜底 |
-| 最长等待 | 6 | 最多等几秒翻译 |
-| 调试日志 | false | true 打印删了几条广告、翻了几段 |
-
-### 需要知道的
+需要知道的：
 
 - 数据结构是照着 xream 的脚本和 [level3tjg/RedditFilter](https://github.com/level3tjg/RedditFilter) 写的，还没对着真机抓的响应核对过。哪里不对，打开「调试日志」看 Surge 日志里 `[Reddit]` 开头的几行。
 - 帖子和评论的正文 App 里有 markdown、richtext、html、preview 几种写法，不确定 App 显示哪个，几种都按段插了译文。段落是去掉格式后按文字对上的。
@@ -497,201 +437,35 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/reddit.sgmodule
 - 打开「调试日志」后，每个响应都会打一行：接口地址、`data` 下面的字段名、有哪些 `__typename`。某个页面没翻译，把这几行发出来就能看出是哪个接口。
 - 测试：`node tools/test_reddit.js`。
 
-## Stack Overflow 翻译
+### X
 
-```
-https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow.sgmodule
-```
+X App 和 Safari 里的 x.com 都管，处理 App 的 GraphQL 接口（`api.x.com/graphql/…`、`api.twitter.com/graphql/…`）和网页版的（`x.com/i/api/graphql/…`），推广和中文推文在接口里就删掉，页面上不会闪一下再消失；留下的外文推文加上译文。脚本：`scripts/x.js`，去广告、屏蔽中文和翻译在同一个脚本里（Surge 一个响应只跑一个脚本）。
 
-Stack Overflow 官方 App 已经下架了，这个模块给第三方客户端用，在 [Octostack](https://apps.apple.com/us/app/-/id6443491836)（App Store 里叫「Stack Overflow Client」）上用。第三方客户端都通过 Stack Exchange 的官方接口 `api.stackexchange.com` 拿数据，脚本直接改接口返回的 JSON，要开 MITM。脚本是自己写的：`scripts/stackoverflow.js`。
-
-### 翻译
-
-- 问题列表、搜索结果：标题的译文接在下一行。
-- 问题页：标题、问题、回答、评论。正文按段对照，一段原文下面紧跟它的译文。列表每项单独翻，译文接在这一项里面；引用里的译文还在引用里。
-- 代码块不翻，行内代码原样保留在译文里。中文段落、纯代码不翻。
-- 接口里正文有 HTML（`body`）和 markdown（`body_markdown`）两种写法，App 用哪个不确定，两种都按段插了译文。同一段两边只翻一次。
-- 热门问题一次返回上百个回答，全翻一个问题就要好几万字。默认只翻前 10 个回答和它们的评论（参数「最多回答」），按 App 里的顺序数，一般就是票数最高的 10 个。标题照翻。
-- 最多等 8 秒（参数「最长等待」，用大模型时 5 秒太短），没翻完的显示原文。退出问题再点进去，翻过的走缓存，会接着翻后面的。缓存最近 800 段。
-- 填了「大模型密钥」就先用大模型翻，带上问题标题，DeepL / Google 兜底，做法见「翻译合集」和「YouTube 双语字幕 → 大模型翻译」。
-- DeepL key、大模型 key 可以和其他翻译模块填一样的，哪个 key 被暂停几个模块共用。
-
-### 参数
-
-| 参数 | 默认 | 说明 |
-| --- | --- | --- |
-| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
-| 大模型密钥 | 占位文字 | OpenAI 的 key，用 `\|` 分隔；不填就只用 DeepL |
-| 大模型 | gpt-4.1-mini | 模型名 |
-| 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
-| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
-| 翻译范围 | all | all 全翻；post 不翻评论；title 只翻标题；off 不翻 |
-| 最多回答 | 10 | 一次最多翻几个回答，0 不限 |
-| 备用翻译 | google | off 表示不用 Google 兜底 |
-| 最长等待 | 8 | 最多等几秒翻译 |
-| 调试日志 | false | true 打印每个响应翻了几段、key 的切换 |
-
-### 需要知道的
-
-- 数据格式是照着 `api.stackexchange.com` 真实返回的数据写的，拿热门问题的真实响应跑过：译文去掉以后原文一个字没变。还没有在 Octostack 上试过。
-- 装好后没有翻译：打开「调试日志」，在 Octostack 里点开一个问题，看 Surge 日志里有没有 `[StackOverflow]` 开头的行。没有的话，到「最近请求」里看 App 的请求发到了哪个域名，把域名发过来。
-- 开了 MITM 以后 App 加载不出来，说明 App 不接受 MITM 证书，这种情况脚本没办法。
-- 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
-- 测试：`node tools/test_stackoverflow.js`。后面加一个存下来的接口响应 JSON 文件，可以看真实数据能翻多少段。
-
-## Stack Overflow 网页翻译
-
-```
-https://raw.githubusercontent.com/justyura/surge-modules/main/stackoverflow-web.sgmodule
-```
-
-给 Safari 用的。用 App 看的话装上面的「Stack Overflow 翻译」，两个模块互不影响，可以只装一个。在 Safari 里打开 stackoverflow.com，点分享 →「添加到主屏幕」，主屏幕上就多一个全屏打开的 Stack Overflow。要开 MITM。脚本是自己写的：`scripts/stackoverflow-web.js`。
-
-也管 Super User、Server Fault、Ask Ubuntu、MathOverflow、各个 `*.stackexchange.com` 站和它们的 meta 站，以及 ru、pt、es、ja 这些语言版的 Stack Overflow。
-
-### 翻译
-
-- 问题页：标题、问题、每个回答、评论。正文按段对照，一段原文下面紧跟它的译文，列表每项单独翻。
-- 列表页、搜索结果：只翻标题。
-- 代码块不翻，行内代码（`<code>`）原样保留在译文里。中文段落、纯代码不翻。
-- 只翻快滚到屏幕里的段落，长帖子往下滑才翻后面的，不会一打开就把整页的额度用掉。点「显示更多评论」后加载出来的评论也会翻。
-- 右下角的橙色「译」按钮：点一下隐藏译文，再点显示，会记住。
-- 翻过的在 Surge 里缓存最近 800 段，再打开同一页不花额度。
-- 填了「大模型密钥」就先用大模型翻，带上页面标题，DeepL / Google 兜底。
-- DeepL key、大模型 key 可以和其他翻译模块填一样的，哪个 key 被暂停几个模块共用。
-
-### 怎么做的
-
-两个脚本，用的是同一个文件：
-
-1. 打开问题页时，往网页里插一段脚本。
-2. 网页脚本把要翻的段落发给同一个网站的 `/__surge-translate`。
-3. Surge 拦下这个请求，自己去调 DeepL，把译文直接返回给网页，请求不会发到 Stack Overflow。
-
-DeepL key 只在 Surge 里用，网页拿不到。在 Safari 里打开 `https://stackoverflow.com/__surge-translate`，能看到模块是不是在工作、DeepL 能不能用。
-
-### 参数
-
-| 参数 | 默认 | 说明 |
-| --- | --- | --- |
-| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
-| 大模型密钥 | 占位文字 | OpenAI 的 key，用 `\|` 分隔；不填就只用 DeepL |
-| 大模型 | gpt-4.1-mini | 模型名 |
-| 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
-| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
-| 翻译范围 | all | all 全翻；post 不翻评论；title 只翻标题；off 不翻 |
-| 备用翻译 | google | off 表示不用 Google 兜底 |
-| 调试日志 | false | true 打印每次翻了几段、key 的切换 |
-
-### 需要知道的
-
-- 页面结构是照着现在的 Stack Overflow 问题页写的，新版评论（Svelte 渲染）和旧版评论都认。拿存下来的真实页面跑过，没有在真机上试过。哪里没翻，打开「调试日志」看 Surge 日志里 `[StackOverflow 网页]` 开头的几行。
-- Stack Overflow 前面有 Cloudflare。开了 MITM 以后如果一直卡在「Verify you are human」，先关掉这个模块试试。
-- 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
-- 测试：`node tools/test_stackoverflow_web.js`，要装 Playwright。后面加一个存下来的问题页 HTML 文件，可以看真实页面能翻多少段。
-
-## GitHub 翻译
-
-```
-https://raw.githubusercontent.com/justyura/surge-modules/main/github.sgmodule
-```
-
-给 GitHub 官方 App 用的。App 通过 `api.github.com` 拿数据，脚本直接改返回的 JSON，要开 MITM。脚本是自己写的：`scripts/github.js`。
-
-### 翻译
-
-- Issue、PR、讨论：标题的译文接在下一行，正文和评论按段对照，一段原文下面紧跟它的译文。
-- Release 说明、仓库简介、README 也翻。
-- 列表每项单独翻，代码块和表格不翻，行内代码原样保留。中文段落不翻，夹着英文名字的中文（比如「AdGuard Home 面板」）也算中文。
-- 一个响应最多翻 400 段，最多等 8 秒（参数「最长等待」），没翻完的显示原文。退出再点进去，翻过的走缓存，会接着翻后面的。缓存最近 800 段。
-- 填了「大模型密钥」就先用大模型翻，带上仓库名和 Issue / PR 标题，DeepL / Google 兜底。
-- DeepL key、大模型 key 可以和其他几个翻译模块填一样的，哪个 key 被暂停几个模块共用。
-
-### 编辑时不会带上译文
-
-App 编辑评论时用的是 markdown 原文（`body`），不是用来显示的 HTML（`bodyHTML`）。脚本只改 HTML，所以在 App 里编辑评论，编辑框里是原文，不会把译文存进去。
-
-标题没有单独的显示用字段，翻了的话改标题时编辑框里会带着译文。所以自己能编辑的 Issue、PR（自己开的，或者自己有权限的仓库里的），标题不翻。
-
-参数「改markdown」打开后，别人的 markdown 原文也会插译文。只有装好后发现标题有译文、正文没有（说明 App 用 markdown 显示）时才需要打开。
-
-### 参数
-
-| 参数 | 默认 | 说明 |
-| --- | --- | --- |
-| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
-| 大模型密钥 | 占位文字 | OpenAI 的 key，用 `\|` 分隔；不填就只用 DeepL |
-| 大模型 | gpt-4.1-mini | 模型名 |
-| 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
-| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
-| 翻译范围 | all | all 全翻；title 只翻标题和仓库简介；off 不翻 |
-| 改markdown | false | true 时 markdown 原文也插译文 |
-| 备用翻译 | google | off 表示不用 Google 兜底 |
-| 最长等待 | 8 | 最多等几秒翻译 |
-| 调试日志 | false | true 打印每个响应的地址、字段和翻了几段 |
-
-### 需要知道的
-
-- GitHub App 具体请求哪些字段没有抓包核对过，是按 GitHub 公开的接口字段写的：GraphQL 里以 `HTML` 结尾的字段（`bodyHTML`、`descriptionHTML`、`titleHTML`）、REST 里的 `body_html`，加上 README 的两种格式（HTML 和 base64 的 markdown）。HTML 照着 GitHub 真实渲染出来的写法测过。
-- 哪里没翻：打开「调试日志」，在 App 里点开那个页面，看 Surge 日志里 `[GitHub]` 开头的行。每个响应一行，写着地址、有哪些类型、有哪些 HTML 字段，把这几行发过来就知道 App 用的是什么。
-- MITM 了 `api.github.com` 以后，其他用 GitHub 接口的 App 拿到的 Issue、README 也会带译文。
-- 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
-- 测试：`node tools/test_github.js`。
-
-## X 去广告、屏蔽中文和翻译
-
-```
-https://raw.githubusercontent.com/justyura/surge-modules/main/x.sgmodule
-```
-
-X App 和 Safari 里的 x.com 都管，处理 App 的 GraphQL 接口（`api.x.com/graphql/…`、`api.twitter.com/graphql/…`）和网页版的（`x.com/i/api/graphql/…`），推广和中文推文在接口里就删掉，页面上不会闪一下再消失；留下的外文推文加上译文。要开 MITM。脚本是自己写的：`scripts/x.js`。
-
-Surge 一个响应只跑一个脚本，所以去广告、屏蔽中文和翻译放在同一个脚本里。
-
-### 去广告
+去广告：
 
 - 「为你推荐」「正在关注」、列表、搜索里的推广帖
 - 推文详情页回复里插的推广
 - 推荐关注里的推广账号、趋势里的推广趋势
 
-### 屏蔽中文
+屏蔽中文：
 
 - 推文正文是中文的删掉：X 自己标的语言是中文，或者正文里汉字比英文单词多（至少 4 个汉字）。长推文看展开后的全文，转推看被转的那条。
 - 带假名、谚文的算日文、韩文，不删；X 标成日文、韩文的也不删。
 - 趋势名字是中文的删掉。
 - 对话串里的中文回复删掉，英文的留着；整串都是中文就整串删。
-- `中文判定` 改成 `strict` 会删得更狠：引用了中文推文、作者名字或简介里有汉字的推文也删（专治名字是中文、发英文的机器人），推荐关注里名字带汉字的账号也删。纯汉字的日文名字会被误伤。
-- 这些地方不删：自己点开的那条推文和它上面的串、个人主页、用中文搜索的结果、白名单里的账号。
+- 「X中文判定」改成 `strict` 会删得更狠：引用了中文推文、作者名字或简介里有汉字的推文也删（专治名字是中文、发英文的机器人），推荐关注里名字带汉字的账号也删。纯汉字的日文名字会被误伤。
+- 这些地方不删：自己点开的那条推文和它上面的串、个人主页、用中文搜索的结果、「X白名单」里的账号。
 
-### 翻译
+翻译：
 
 - 推文正文后面空一行接上译文。长推文翻全文，译文在全文最后，时间线上要点「显示更多」才看得到。转推翻被转的那条，引用的推文也翻。
 - X 标的语言已经是目标语言的不翻，纯链接、纯表情、只有 @ 或话题的不翻。日文、韩文照翻。
-- 推文少时一个 DeepL 请求翻完，多时拆成最多 6 个请求同时翻。翻过的缓存最近 500 条，刷新、翻回来都不再花额度。
+- 翻过的缓存最近 500 条，刷新、翻回来都不再花额度。
 - 最多等 6 秒（参数「最长等待」），没翻完的显示原文，广告和中文照样删掉。刷新一下会接着翻。
-- 填了「大模型密钥」就先用大模型翻，推文按页面顺序几条一组，推文详情页里回复挨着它回的推文，DeepL / Google 兜底。
-- 不填 DeepL 密钥也能用：备用翻译是 `google` 时直接用 Google 翻译。
-- DeepL key、大模型 key 可以和其他翻译模块填一样的，哪个 key 被暂停几个模块共用。
-- 不想翻译把「翻译」改成 `off`。
+- 大模型按页面顺序几条一组翻，推文详情页里回复挨着它回的推文。
+- 只想去广告、屏蔽中文，不想翻译：把「X翻译」改成 `off`。
 
-### 参数
-
-| 参数 | 默认 | 说明 |
-| --- | --- | --- |
-| 屏蔽中文 | true | false 只去广告 |
-| 中文判定 | normal | normal 只看正文；strict 再看引用、作者名字和简介 |
-| 白名单 | 占位文字 | 不删的账号，填 @ 后面的用户名，多个用 `\|` 分隔 |
-| DeepL密钥 | 占位文字 | 一个或多个 key，用 `\|` 分隔 |
-| 大模型密钥 | 占位文字 | OpenAI 的 key，用 `\|` 分隔；不填就只用 DeepL |
-| 大模型 | gpt-4.1-mini | 模型名 |
-| 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
-| 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
-| 翻译 | all | off 不翻译 |
-| 备用翻译 | google | off 表示不用 Google 兜底 |
-| 最长等待 | 6 | 最多等几秒翻译 |
-| 调试日志 | false | true 打印每个接口删了哪些条目、翻了几条 |
-
-### 需要知道的
+需要知道的：
 
 - 装好后把 X App 从后台划掉再打开。脚本按网页版的响应写的，不按固定路径找条目，App 的结构差不多就能用，但还没对着真机核对过。
 - App 里没效果时，打开「调试日志」刷新一下，看 Surge 日志里 `[X]` 开头的几行：
@@ -699,16 +473,95 @@ Surge 一个响应只跑一个脚本，所以去广告、屏蔽中文和翻译�
   - `不是 JSON`：App 这个接口返回的不是 JSON，脚本处理不了。
   - `没找到带 entryId 的条目，响应的结构：…`：结构和网页版不一样，把这行发出来照着改。
   - `没删东西`：结构认得，但这一页正好没有广告和中文。
-- 如果 X App 加载不出来，说明 App 不认 MITM 证书，先关掉这个模块。
+- 如果 X App 加载不出来，说明 App 不认 MITM 证书，先把「X」开关填 `#`。
 - 网页上的「打开 App」弹窗由「网页弹窗和广告拦截」管，两个一起装不冲突。
 - 网页版第一次装好后，在 Safari 设置里清一下 x.com 的网站数据，不然旧缓存里的推文还会出来。
 - 不按固定路径找，整个响应里带 `entryId` 的条目都看，X 改了外层字段名也照样能用。
 - 网页显示推文用的是 `full_text` 里 `display_text_range` 那一段，译文插在这一段末尾，后面图片链接的下标跟着往后挪，所以图片、链接、@ 都还能点。
 - 测试：`node tools/test_x.js`。
 
+### GitHub
+
+给 GitHub 官方 App 用的。App 通过 `api.github.com` 拿数据，脚本直接改返回的 JSON。脚本：`scripts/github.js`。
+
+- Issue、PR、讨论：标题的译文接在下一行，正文和评论按段对照，一段原文下面紧跟它的译文。
+- Release 说明、仓库简介、README 也翻。
+- 列表每项单独翻，代码块和表格不翻，行内代码原样保留。中文段落不翻，夹着英文名字的中文（比如「AdGuard Home 面板」）也算中文。
+- 一个响应最多翻 400 段，最多等 6 秒（参数「最长等待」，长 README 可以调到 8），没翻完的显示原文。退出再点进去，翻过的走缓存，会接着翻后面的。缓存最近 800 段。
+- 大模型带上仓库名和 Issue / PR 标题。
+
+**编辑时不会带上译文**：App 编辑评论时用的是 markdown 原文（`body`），不是用来显示的 HTML（`bodyHTML`）。脚本只改 HTML，所以在 App 里编辑评论，编辑框里是原文，不会把译文存进去。
+
+标题没有单独的显示用字段，翻了的话改标题时编辑框里会带着译文。所以自己能编辑的 Issue、PR（自己开的，或者自己有权限的仓库里的），标题不翻。
+
+参数「GitHub改markdown」打开后，别人的 markdown 原文也会插译文。只有装好后发现标题有译文、正文没有（说明 App 用 markdown 显示）时才需要打开。
+
+需要知道的：
+
+- GitHub App 具体请求哪些字段没有抓包核对过，是按 GitHub 公开的接口字段写的：GraphQL 里以 `HTML` 结尾的字段（`bodyHTML`、`descriptionHTML`、`titleHTML`）、REST 里的 `body_html`，加上 README 的两种格式（HTML 和 base64 的 markdown）。HTML 照着 GitHub 真实渲染出来的写法测过。
+- 哪里没翻：打开「调试日志」，在 App 里点开那个页面，看 Surge 日志里 `[GitHub]` 开头的行。每个响应一行，写着地址、有哪些类型、有哪些 HTML 字段，把这几行发过来就知道 App 用的是什么。
+- MITM 了 `api.github.com` 以后，其他用 GitHub 接口的 App 拿到的 Issue、README 也会带译文。
+- 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
+- 测试：`node tools/test_github.js`。
+
+### Stack Overflow App
+
+Stack Overflow 官方 App 已经下架了，这个给第三方客户端用，在 [Octostack](https://apps.apple.com/us/app/-/id6443491836)（App Store 里叫「Stack Overflow Client」）上用。第三方客户端都通过 Stack Exchange 的官方接口 `api.stackexchange.com` 拿数据，脚本直接改接口返回的 JSON。脚本：`scripts/stackoverflow.js`。
+
+- 问题列表、搜索结果：标题的译文接在下一行。
+- 问题页：标题、问题、回答、评论。正文按段对照，一段原文下面紧跟它的译文。列表每项单独翻，译文接在这一项里面；引用里的译文还在引用里。
+- 代码块不翻，行内代码原样保留在译文里。中文段落、纯代码不翻。
+- 接口里正文有 HTML（`body`）和 markdown（`body_markdown`）两种写法，App 用哪个不确定，两种都按段插了译文。同一段两边只翻一次。
+- 热门问题一次返回上百个回答，全翻一个问题就要好几万字。默认只翻前 10 个回答和它们的评论（参数「StackOverflow最多回答」），按 App 里的顺序数，一般就是票数最高的 10 个。标题照翻。
+- 最多等 6 秒（参数「最长等待」），没翻完的显示原文。退出问题再点进去，翻过的走缓存，会接着翻后面的。缓存最近 800 段。
+- 大模型带上问题标题，回答单独加载时用最近打开的那个问题。
+
+需要知道的：
+
+- 数据格式是照着 `api.stackexchange.com` 真实返回的数据写的，拿热门问题的真实响应跑过：译文去掉以后原文一个字没变。还没有在 Octostack 上试过。
+- 装好后没有翻译：打开「调试日志」，在 Octostack 里点开一个问题，看 Surge 日志里有没有 `[StackOverflow]` 开头的行。没有的话，到「最近请求」里看 App 的请求发到了哪个域名，把域名发过来。
+- 开了 MITM 以后 App 加载不出来，说明 App 不接受 MITM 证书，这种情况脚本没办法。
+- 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
+- 测试：`node tools/test_stackoverflow.js`。后面加一个存下来的接口响应 JSON 文件，可以看真实数据能翻多少段。
+
+### Stack Overflow 网页
+
+给 Safari 用的。在 Safari 里打开 stackoverflow.com，点分享 →「添加到主屏幕」，主屏幕上就多一个全屏打开的 Stack Overflow。也管 Super User、Server Fault、Ask Ubuntu、MathOverflow、各个 `*.stackexchange.com` 站和它们的 meta 站，以及 ru、pt、es、ja 这些语言版的 Stack Overflow。脚本：`scripts/stackoverflow-web.js`。
+
+- 问题页：标题、问题、每个回答、评论。正文按段对照，一段原文下面紧跟它的译文，列表每项单独翻。
+- 列表页、搜索结果：只翻标题。
+- 代码块不翻，行内代码（`<code>`）原样保留在译文里。中文段落、纯代码不翻。
+- 只翻快滚到屏幕里的段落，长帖子往下滑才翻后面的，不会一打开就把整页的额度用掉。点「显示更多评论」后加载出来的评论也会翻。
+- 右下角的橙色「译」按钮：点一下隐藏译文，再点显示，会记住。
+- 翻过的在 Surge 里缓存最近 800 段，再打开同一页不花额度。
+- 大模型带上页面标题。
+
+怎么做的：
+
+两个脚本，用的是同一个文件：
+
+1. 打开问题页时，往网页里插一段脚本。
+2. 网页脚本把要翻的段落发给同一个网站的 `/__surge-translate`。
+3. Surge 拦下这个请求，自己去调大模型 / DeepL，把译文直接返回给网页，请求不会发到 Stack Overflow。
+
+key 只在 Surge 里用，网页拿不到。在 Safari 里打开 `https://stackoverflow.com/__surge-translate`，能看到模块是不是在工作、大模型和 DeepL 能不能用。
+
+需要知道的：
+
+- 页面结构是照着现在的 Stack Overflow 问题页写的，新版评论（Svelte 渲染）和旧版评论都认。拿存下来的真实页面跑过，没有在真机上试过。哪里没翻，打开「调试日志」看 Surge 日志里 `[StackOverflow 网页]` 开头的几行。
+- Stack Overflow 前面有 Cloudflare。开了 MITM 以后如果一直卡在「Verify you are human」，先把「StackOverflow网页」开关填 `#` 试试。
+- 用 Google 兜底时译文里行内代码的格式会丢，只剩文字。
+- 测试：`node tools/test_stackoverflow_web.js`，要装 Playwright。后面加一个存下来的问题页 HTML 文件，可以看真实页面能翻多少段。
+
+### 维护
+
+- 几个脚本的大模型代码是同一份：改 `scripts/lib/llm.js`，再跑 `python3 tools/sync_llm.py` 同步进各个脚本（Surge 脚本不能互相引用，只能各放一份）。
+- 改了 `translate.sgmodule`（参数、脚本地址、匹配规则）跑 `node tools/test_translate.js`：检查用到的参数都声明了、每个参数都有说明、传给脚本的字段脚本都认识，顺带检查大模型代码有没有同步。
+- 各站点的测试：`node tools/test_subtitles.js`、`test_reddit.js`、`test_x.js`、`test_github.js`、`test_stackoverflow.js`、`test_stackoverflow_web.js`（要装 Playwright）。都模拟了 Surge 和大模型 / DeepL / Google 接口，假的大模型在 `tools/fake_llm.js`。
+
 ## 规矩
 
 - 地址、token、订阅链接一律走 `#!arguments`，不写死在模块里。
 - 新增模块时，在上面的表格里加一行，再补一节说明。
 - 去广告规则改 `ads/`，改完跑 `python3 tools/build.py`。
-- 翻译模块改完跑 `python3 tools/build_translate.py` 重新生成翻译合集；大模型代码改 `scripts/lib/llm.js`，改完跑 `python3 tools/sync_llm.py`。两个都可以加 `--check` 只检查不改。
+- 翻译都在「翻译合集」一个模块里，新站点也加进去，不再单独出模块。大模型代码改 `scripts/lib/llm.js`，改完跑 `python3 tools/sync_llm.py`；改了模块跑 `node tools/test_translate.js`。
