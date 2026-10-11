@@ -291,8 +291,9 @@ YouTube 字幕和评论、Reddit、X、GitHub、Stack Overflow（App 和 Safari�
 | --- | --- | --- |
 | 大模型密钥 | 占位文字 | OpenAI 的 key，用 `\|` 分隔，所有站点共用 |
 | DeepL密钥 | 占位文字 | 可以不填，兜底用 |
-| 大模型 | gpt-4.1-mini | 模型名 |
+| 大模型 | gpt-6-luna | 模型名 |
 | 大模型接口 | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址 |
+| 大模型思考 | auto | auto 按模型自动关掉思考；none、low、medium… 照填；off 不带这个参数 |
 | 目标语言 | ZH-HANS | ZH-HANT 繁体，也可以填 EN-US、JA、KO 等 |
 | 备用翻译 | google | off 表示不用 Google 兜底 |
 | 最长等待 | 6 | Reddit、X、GitHub、Stack Overflow App 最多等几秒翻译 |
@@ -318,7 +319,7 @@ YouTube 字幕和评论、Reddit、X、GitHub、Stack Overflow（App 和 Safari�
 
 DeepL 和 Google 一句一句翻，看不到前后文：自动字幕一句话被切成好几行、没有标点、还有听错的词，翻出来经常是半句半句的；评论里的梗、人名也常翻错。所以先用大模型翻，DeepL、Google 变成兜底。
 
-- **YouTube 字幕**：按时间顺序分组，每组二十句左右，同时带上视频标题、频道名和前面 6 句。大模型看得懂整句话，能纠正自动字幕听错的词，人名、术语前后一致。每行译文还是对着自己那行，时间轴不乱。
+- **YouTube 字幕**：按时间顺序分组，每组二十句左右，同时带上视频标题、频道名、前面 10 句和后面 6 句。一组最后一句话常常在下一组才说完，带上后面几句才知道这半句是什么意思。大模型看得懂整句话，能纠正自动字幕听错的词，人名、术语前后一致。每行译文还是对着自己那行，时间轴不乱。
 - **YouTube 评论**：带上视频标题，几条一组同时翻，梗和人名能对上视频内容。点进去看回复时，用的是最近打开的那个视频的标题。
 - 视频标题用 YouTube 的 oEmbed 接口查（不用登录），最近 30 个视频的标题会记住。
 
@@ -326,7 +327,34 @@ DeepL 和 Google 一句一句翻，看不到前后文：自动字幕一句话被
 
 一两个小时的长视频，一次只能用大模型翻前面一部分（默认 8 秒大概几百句），后面先是 DeepL 的，关掉字幕再打开接着用大模型翻。YouTube 不报「加载字幕时出错」的话，可以把「字幕最长等待」调到 15～20 秒，一次多翻一些。评论用大模型时最多等 6 秒。
 
-**模型和费用**：默认 `gpt-4.1-mini`，便宜、快，不用「思考」。按它每百万 token 输入 0.4 美元、输出 1.6 美元估算，一个 20 分钟的视频大约 0.01～0.02 美元，一页评论不到 0.01 美元。想更省可以填 `gpt-4.1-nano`，质量差一点。填 `gpt-5` 系列会自动关掉思考（gpt-5 / gpt-5-mini / gpt-5-nano 用 `minimal`，gpt-5.x 用 `none`，模型不认这个参数就去掉重试）。价格以 OpenAI 官网为准。
+**模型和费用**：默认 `gpt-6-luna`，每百万 token 输入 0.1 美元、输出 0.5 美元，一个 20 分钟的视频不到 0.01 美元，一页评论零点几美分。要更好的质量可以填 `gpt-6-sol`。价格以 OpenAI 官网为准。
+
+**关掉思考**：gpt-6-luna 默认会先「思考」（`medium`）再回答。翻译用不着，开着一组要多等好几秒，来不及的句子就变成 DeepL / Google 的译文，看起来反而不准。所以参数「大模型思考」默认 `auto`，按模型自动关到最低：
+
+| 模型 | auto 用的档位 |
+| --- | --- |
+| gpt-6-luna、gpt-6-sol、gpt-5.x | `none`，完全不思考 |
+| gpt-5、gpt-5-mini、gpt-5-nano | `minimal` |
+| gpt-6.1-sol、gpt-6-astra、o 系列 | `low`，它们没有 none |
+| gpt-4.1 系列、别家的模型 | 不带这个参数 |
+
+模型不认填的档位时，none / minimal 退到 low 再试，还不认就不带这个参数。想让它多想一点就填 `low` 或 `medium`，别家接口报错就填 `off`。打开「调试日志」，Surge 日志里每次请求都会打出用时和思考用掉的 token。
+
+### 测试面板
+
+装好后 Surge 首页多一个「翻译测试」面板，点一下，用你填的 key、模型、接口和「大模型思考」翻一小段字幕，显示出来大概是这样：
+
+```
+gpt-6-luna · 思考 none · 0.8 秒
+思考 token 0，思考已关掉
+原文：and then everyone rushed to the bank
+译文：然后所有人都冲向银行
+```
+
+- 测试的字幕是一句话被切成两行，单看这一行分不清 bank 是银行还是河岸，要结合视频标题和前后几句。翻成河岸会提示「没结合上下文」。
+- 思考 token 不是 0，说明思考没关掉，面板会提示改「大模型思考」。
+- 填了多个 key 会每个都测，列出哪个能用、哪个不能用（key 无效、额度用完、模型名不对、连不上接口）。
+- 每点一次每个 key 一个很小的请求，几百个 token。面板不会自己定时刷新，只在点的时候测。
 
 **别家的接口**：「大模型接口」默认 `https://api.openai.com/v1`。DeepSeek、OpenRouter、自己部署的 One API 之类兼容 OpenAI Chat Completions 的接口都行，填它们的地址（到 `/v1` 为止），「大模型」填那家的模型名。要求接口支持 `response_format: {"type": "json_object"}`。
 
@@ -334,7 +362,7 @@ DeepL 和 Google 一句一句翻，看不到前后文：自动字幕一句话被
 
 | 站点 | 除了要翻的段落，一起发过去的 |
 | --- | --- |
-| YouTube 字幕 | 视频标题和频道名，每组前面 6 句字幕 |
+| YouTube 字幕 | 视频标题和频道名，每组前面 10 句、后面 6 句字幕 |
 | YouTube 评论 | 视频标题和频道名（回复用最近打开的视频） |
 | Reddit | 帖子标题（评论单独加载时用 10 分钟内最近打开的帖子），同一条帖子、评论的几段挨在一起 |
 | X | 是哪种页面（推文详情是一条推文加它的回复，按顺序），推文按页面顺序 |
@@ -557,7 +585,7 @@ key 只在 Surge 里用，网页拿不到。在 Safari 里打开 `https://stacko
 
 - 几个脚本的大模型代码是同一份：改 `scripts/lib/llm.js`，再跑 `python3 tools/sync_llm.py` 同步进各个脚本（Surge 脚本不能互相引用，只能各放一份）。
 - 改了 `translate.sgmodule`（参数、脚本地址、匹配规则）跑 `node tools/test_translate.js`：检查用到的参数都声明了、每个参数都有说明、传给脚本的字段脚本都认识，顺带检查大模型代码有没有同步。
-- 各站点的测试：`node tools/test_subtitles.js`、`test_reddit.js`、`test_x.js`、`test_github.js`、`test_stackoverflow.js`、`test_stackoverflow_web.js`（要装 Playwright）。都模拟了 Surge 和大模型 / DeepL / Google 接口，假的大模型在 `tools/fake_llm.js`。
+- 各站点的测试：`node tools/test_subtitles.js`、`test_reddit.js`、`test_x.js`、`test_github.js`、`test_stackoverflow.js`、`test_stackoverflow_web.js`（要装 Playwright），测试面板是 `test_translate_panel.js`。都模拟了 Surge 和大模型 / DeepL / Google 接口，假的大模型在 `tools/fake_llm.js`。
 
 ## 规矩
 

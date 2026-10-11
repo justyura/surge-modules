@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LIB = ROOT / "scripts" / "lib" / "llm.js"
-SCRIPTS = ["youtube-subtitles", "reddit", "x", "github", "stackoverflow", "stackoverflow-web"]
+SCRIPTS = ["youtube-subtitles", "reddit", "x", "github", "stackoverflow", "stackoverflow-web", "translate-panel"]
 BEGIN = "// ---------- 大模型：OpenAI 或兼容 OpenAI 的接口 ----------\n"
 END = "// ---------- 大模型结束 ----------\n"
 

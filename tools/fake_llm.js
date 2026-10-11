@@ -7,6 +7,8 @@
 //   drop: 漏掉的编号
 //   wrap: true（回复多包一层 { translations: … }）
 //   error: 出错时的 body
+//   reasoning: 回复里 usage 报的思考 token（默认 0）
+//   reply: 直接用这个当 message.content
 // }
 // 不是发给大模型的请求返回 false，交给调用方处理
 module.exports = function fakeLlm(req, cb, calls, llm = {}) {
@@ -25,7 +27,9 @@ module.exports = function fakeLlm(req, cb, calls, llm = {}) {
     let out = {};
     for (const [k, v] of Object.entries(payload[field])) if (k !== String(llm.drop)) out[k] = '模:' + v;
     if (llm.wrap) out = { translations: out };
-    cb(null, { status: 200 }, JSON.stringify({ choices: [{ message: { content: JSON.stringify(out) } }] }));
+    const usage = { prompt_tokens: 100, completion_tokens: 20, completion_tokens_details: { reasoning_tokens: llm.reasoning || 0 } };
+    const content = llm.reply ?? JSON.stringify(out);
+    cb(null, { status: 200 }, JSON.stringify({ choices: [{ message: { content } }], usage }));
   }, llm.latency || 0);
   return true;
 };

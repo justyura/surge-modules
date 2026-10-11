@@ -476,13 +476,18 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     const calls = llmCalls(r);
     assert.ok(calls.length >= 2, '分成几组同时翻');
     assert.strictEqual(calls[0].url, 'https://api.openai.com/v1/chat/completions');
-    assert.deepStrictEqual([calls[0].key, calls[0].model, calls[0].effort, calls[0].format], [L1, 'gpt-4.1-mini', undefined, 'json_object']);
+    assert.deepStrictEqual([calls[0].key, calls[0].model, calls[0].effort, calls[0].format], [L1, 'gpt-6-luna', 'none', 'json_object'], '默认 gpt-6-luna，关掉思考');
     assert.ok(calls[0].system.includes('Simplified Chinese'));
     assert.strictEqual(calls[0].payload.video, 'Fixing a squeaky door — Handy Dan', '视频标题当上下文');
     assert.deepStrictEqual(calls[0].payload.before, []);
+    const firstEnd = lines.indexOf(calls[0].payload.lines[String(calls[0].n)]) + 1;
+    assert.deepStrictEqual(calls[0].payload.after, lines.slice(firstEnd, firstEnd + 6), '带上后面 6 句');
+    assert.ok(calls[0].system.includes('"after"'));
     const second = calls.find((c) => c.payload.lines['1'] !== lines[0]);
     const at = lines.indexOf(second.payload.lines['1']);
-    assert.deepStrictEqual(second.payload.before, lines.slice(at - 6, at), '后面的组带上前 6 句');
+    assert.deepStrictEqual(second.payload.before, lines.slice(at - 10, at), '后面的组带上前 10 句');
+    const last = calls.find((c) => lines.indexOf(c.payload.lines[String(c.n)]) === lines.length - 1);
+    assert.deepStrictEqual(last.payload.after, [], '最后一组后面没有了');
     assert.ok(!JSON.stringify(r.store).includes(L1), '状态里不存大模型 key 明文');
 
     const r2 = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1, LLM()), store: r.store });
@@ -491,7 +496,7 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     // 关掉大模型：大模型的缓存不当 DeepL 的用
     const r3 = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1), store: r.store });
     assert.ok(deeplCalls(r3).length > 0 && events(r3.out)[0] === lines[0] + '\n译:' + lines[0]);
-    console.log(`ok  大模型：字幕分 ${calls.length} 组同时翻，带视频标题和前 6 句，DeepL 不用，缓存分开`);
+    console.log(`ok  大模型：字幕分 ${calls.length} 组同时翻，带视频标题、前 10 句和后 6 句，DeepL 不用，缓存分开`);
   }
 
   // 18. 大模型 key 无效（401）：暂停 7 天、换下一个；都不行马上用 DeepL，不等到截止
@@ -541,11 +546,22 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     const r2 = await run({ url: URL_EN, body: json3(['Hey']), args: ARGS(K1, LLM() + '&model=gpt-5-mini&api=https://llm.example.com/v1/') });
     assert.deepStrictEqual([llmCalls(r2)[0].url, llmCalls(r2)[0].model, llmCalls(r2)[0].effort], ['https://llm.example.com/v1/chat/completions', 'gpt-5-mini', 'minimal']);
     const r3 = await run({ url: URL_EN, body: json3(['Hey']), args: ARGS(K1, LLM() + '&model=gpt-5.4-nano'), llm: { status: 400, error: '{"error":{"message":"Unsupported value: reasoning_effort"}}' } });
-    assert.deepStrictEqual(llmCalls(r3).map((c) => c.effort), ['none', undefined], '不认 reasoning_effort 就去掉重试');
+    assert.deepStrictEqual(llmCalls(r3).map((c) => c.effort), ['none', 'low', undefined], '不认这一档就退到 low，再不认就去掉');
+    // 按模型自动选思考档位；参数「大模型思考」可以指定或者不带
+    const effortOf = async (extra) => llmCalls(await run({ url: URL_EN, body: json3(['Hey']), args: ARGS(K1, LLM() + extra) }))[0].effort;
+    assert.strictEqual(await effortOf('&model=gpt-6-sol'), 'none');
+    assert.strictEqual(await effortOf('&model=openai/gpt-6-luna'), 'none', 'OpenRouter 的写法');
+    assert.strictEqual(await effortOf('&model=gpt-6.1-sol'), 'low', 'GPT-6.1 Sol 没有 none');
+    assert.strictEqual(await effortOf('&model=gpt-6-astra'), 'low');
+    assert.strictEqual(await effortOf('&model=gpt-4.1-mini'), undefined, '不会思考的模型不带');
+    assert.strictEqual(await effortOf('&model=deepseek-chat'), undefined);
+    assert.strictEqual(await effortOf('&effort=off'), undefined, 'off 不带参数');
+    assert.strictEqual(await effortOf('&effort=LOW'), 'low', '照填');
+    assert.strictEqual(await effortOf('&effort=填错了'), 'none', '填错按 auto');
     // 占位文字当没填
     const r4 = await run({ url: URL_EN, body: json3(['Hey']), args: ARGS(K1, '&llmkeys=不用大模型就留着') });
     assert.strictEqual(llmCalls(r4).length, 0);
-    console.log('ok  大模型漏句用 DeepL 补、多包一层也认，gpt-5 关思考，不认参数就重试，占位文字当没填');
+    console.log('ok  大模型漏句用 DeepL 补、多包一层也认，按模型关思考、可以指定，不认就退一档重试，占位文字当没填');
   }
 
   // 22. 大模型翻评论：带视频标题（从 token 解出视频 ID），缓存带前缀；回复用最近的视频标题

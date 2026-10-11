@@ -22,7 +22,8 @@
  * 参数（模块里的 argument，用 & 分隔）：
  *   keys      DeepL key，多个用 | 分隔
  *   llmkeys   大模型 key，多个用 | 分隔
- *   model     模型名，默认 gpt-4.1-mini
+ *   model     模型名，默认 gpt-6-luna
+ *   effort    大模型思考档位：auto 按模型自动关掉思考，off 不带参数，或者 none、low、medium 这些
  *   api       接口地址，默认 https://api.openai.com/v1
  *   target    目标语言，DeepL 的写法，比如 ZH-HANS、ZH-HANT、EN-US、JA
  *   translate all：标题、正文、评论都翻；title：只翻标题；off：只去广告
@@ -51,7 +52,7 @@ var POST_KEY = 'reddit-last-post';      // 最近打开的帖子标题：评论�
 var POST_SECONDS = 600;                 // 帖子标题多久内还算数
 
 function parseArgs(raw) {
-  var args = { keys: '', target: 'ZH-HANS', translate: 'all', fallback: 'google', budget: '4', debug: 'false', llmkeys: '', model: '', api: '' };
+  var args = { keys: '', target: 'ZH-HANS', translate: 'all', fallback: 'google', budget: '4', debug: 'false', llmkeys: '', model: '', api: '', effort: '' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -480,10 +481,14 @@ async function translate(texts, state) {
 
 var LLM_TAG = 'llm#';  // 缓存里大模型译文的 key 前缀，兜底的译文不带
 
-// parseArgs 里调用：llmkeys、model、api 三个参数。占位文字（中文）会被滤掉，等于没填
+// parseArgs 里调用：llmkeys、model、api、effort 四个参数。占位文字（中文）会被滤掉，等于没填。
+// effort：auto 按模型自动关掉思考；off 不带这个参数（不支持思考的模型、别家接口）；其他照填
 function parseLlmArgs(args) {
   args.llmKeyList = String(args.llmkeys || '').split(/[|,\s]+/).filter(function (k) { return /^[\x21-\x7e]{20,}$/.test(k); });
-  args.model = /^[\w.:\/-]+$/.test(args.model || '') ? args.model : 'gpt-4.1-mini';
+  // 脚本开头就调用，这一段的 var 还没赋值，所以默认值直接写在这里
+  args.model = /^[\w.:\/-]+$/.test(args.model || '') ? args.model : 'gpt-6-luna';
+  var effort = String(args.effort || '').toLowerCase();
+  args.effort = /^(?:off|none|minimal|low|medium|high|xhigh|max)$/.test(effort) ? effort : 'auto';
   args.api = /^https?:\/\/[^\s"]+$/i.test(args.api || '') ? args.api.replace(/\/+$/, '').replace(/\/chat\/completions$/, '') : 'https://api.openai.com/v1';
   return args;
 }
@@ -518,12 +523,27 @@ var LANG_NAMES = {
 
 function targetName() { return LANG_NAMES[ARGS.target] || LANG_NAMES[ARGS.target.split('-')[0]] || ARGS.target; }
 
-// gpt-5 系列默认先「思考」再回答，翻译用不着，关掉省时间；其他模型不带这个参数
+// 会思考的模型默认先「思考」再回答（gpt-6-luna 默认 medium），翻译用不着，又慢又费钱，自动关到最低：
+// 能填 none 的填 none，不能的填它支持的最低一档；不会思考的模型不带这个参数。
+// 参数「大模型思考」不是 auto 时按它来，off 表示不带
 function reasoningEffort(model) {
+  if (ARGS.effort === 'off') return '';
+  if (ARGS.effort !== 'auto') return ARGS.effort;
+  model = String(model).replace(/^openai\//, '');  // OpenRouter 的模型名带 openai/ 前缀
   if (/^gpt-5(?:-mini|-nano)?(?:-\d{4}-\d{2}-\d{2})?$/.test(model)) return 'minimal';
   if (/^gpt-5\.\d/.test(model)) return 'none';
+  if (/^gpt-6-(?:sol|luna)(?:-\d{4}-\d{2}-\d{2})?$/.test(model)) return 'none';
+  if (/^gpt-6/.test(model) || /^o\d/.test(model)) return 'low';  // GPT-6.1 Sol、Astra、o 系列没有 none
   return '';
 }
+
+// 模型不认这一档时退一步：none / minimal 换 low，再不认就不带参数
+function lowerEffort(effort) {
+  return effort === 'none' || effort === 'minimal' ? 'low' : '';
+}
+
+// 最近一次大模型请求：用时、实际的思考档位、思考用掉的 token。测试面板用，调试日志也打出来
+var llmLast = null;
 
 function llmOnce(key, system, payload, effort) {
   var body = {
@@ -532,22 +552,33 @@ function llmOnce(key, system, payload, effort) {
     response_format: { type: 'json_object' },
   };
   if (effort) body.reasoning_effort = effort;
+  var started = Date.now();
   return request('post', {
     url: ARGS.api + '/chat/completions',
     headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     timeout: Math.max(2, Math.min(30, Math.ceil(remaining()))),
   }).then(function (r) {
-    if (r.error) return { ok: false, status: 0 };
-    // 这个模型不认 reasoning_effort：去掉再试一次
-    if (r.status === 400 && effort && /reasoning/i.test(r.body)) return llmOnce(key, system, payload, '');
+    if (r.error) { llmLast = { ms: Date.now() - started, effort: effort || '-', status: 0, body: String(r.error) }; return { ok: false, status: 0 }; }
+    // 这个模型不认这一档 reasoning_effort：退一步再试
+    if (r.status === 400 && effort && /reasoning/i.test(r.body)) return llmOnce(key, system, payload, lowerEffort(effort));
     if (r.status !== 200) {
       log('大模型出错，状态码 ' + r.status + '：' + String(r.body || '').slice(0, 200));
+      llmLast = { ms: Date.now() - started, effort: effort || '-', status: r.status, body: String(r.body || '').slice(0, 300) };
       // 401 key 无效按 403 暂停；429 里的额度用完（insufficient_quota）按 456 暂停
       return { ok: false, status: r.status === 401 ? 403 : r.status === 429 && /insufficient_quota/.test(r.body) ? 456 : r.status };
     }
     try {
-      var content = JSON.parse(r.body).choices[0].message.content;
+      var reply = JSON.parse(r.body);
+      var usage = reply.usage || {};
+      llmLast = {
+        ms: Date.now() - started, effort: effort || '-',
+        reasoning: (usage.completion_tokens_details || {}).reasoning_tokens || 0,
+        input: usage.prompt_tokens || 0, output: usage.completion_tokens || 0,
+      };
+      log('大模型 ' + (llmLast.ms / 1000).toFixed(1) + ' 秒，思考 ' + llmLast.effort + '，思考 token ' + llmLast.reasoning
+        + '，输入 ' + llmLast.input + ' / 输出 ' + llmLast.output + ' token');
+      var content = reply.choices[0].message.content;
       return { ok: true, list: JSON.parse(String(content).replace(/^\s*```(?:json)?|```\s*$/g, '')) };
     } catch (e) {
       log('大模型返回的不是 JSON');

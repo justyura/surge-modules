@@ -287,7 +287,7 @@ const postPage = () => ({
     const llm = r.calls.filter((c) => c.vendor === 'llm');
     assert.ok(llm.length >= 1 && !r.calls.some((c) => c.vendor === 'deepl'), '大模型翻完不用 DeepL');
     assert.strictEqual(llm[0].payload.post, 'How do I fix a squeaky door?');
-    assert.strictEqual(llm[0].model, 'gpt-4.1-mini');
+    assert.strictEqual(llm[0].model, 'gpt-6-luna');
     assert.ok(llm[0].system.includes('Reddit') && llm[0].system.includes('Simplified Chinese'));
     assert.deepStrictEqual(llm.flatMap((c) => Object.values(c.payload.texts)).slice(0, 2), ['How do I fix a squeaky door?', 'It squeaks every time. See this video.'], '按页面顺序，标题在前');
 

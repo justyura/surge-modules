@@ -2,7 +2,7 @@
 // translate.sgmodule（翻译合集）的检查：参数和脚本对得上。
 //   - 脚本里用到的 {{{参数}}} 都在 #!arguments 里，#!arguments 里的参数都有用到，每个参数都有说明
 //   - script-path 指向仓库里真有的脚本，argument 里的每个字段都是那个脚本 parseArgs 认识的
-//   - 站点开关的默认值就是脚本名，不带空格和引号（会被原样换进脚本名）
+//   - 站点开关的默认值就是脚本名，不带空格和引号（会被原样换进脚本名）；面板脚本（generic）要有面板引用
 //   - 几个脚本里的大模型代码和 scripts/lib/llm.js 一样
 //
 //   node tools/test_translate.js
@@ -29,10 +29,15 @@ for (const line of scripts) {
     assert.ok(names.includes(m[1]), `「${m[1]}」没在 #!arguments 里`);
     used.add(m[1]);
   }
-  const sw = /^\{\{\{(.+?)\}\}\}/.exec(name);
-  assert.ok(sw, `脚本「${name}」要用站点开关当名字`);
-  const value = args.find((a) => a.name === sw[1]).value;
-  assert.ok(/^[^\s"#]+$/.test(value), `开关「${sw[1]}」的默认值不能有空格、引号：${value}`);
+  if (rest.startsWith('type=generic')) {
+    // 面板脚本：要有面板引用它
+    assert.ok(new RegExp(`script-name=${name}(?:,|$)`, 'm').test(section('Panel')), `「${name}」没有面板用它`);
+  } else {
+    const sw = /^\{\{\{(.+?)\}\}\}/.exec(name);
+    assert.ok(sw, `脚本「${name}」要用站点开关当名字`);
+    const value = args.find((a) => a.name === sw[1]).value;
+    assert.ok(/^[^\s"#]+$/.test(value), `开关「${sw[1]}」的默认值不能有空格、引号：${value}`);
+  }
 
   const file = /script-path=https:\/\/raw\.githubusercontent\.com\/justyura\/surge-modules\/main\/(scripts\/[\w-]+\.js)/.exec(rest)[1];
   const code = fs.readFileSync(path.join(ROOT, file), 'utf8');
