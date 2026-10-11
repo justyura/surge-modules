@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const fakeLlm = require('./fake_llm');
 
 let playwright;
 try {
@@ -23,7 +24,7 @@ const URL = 'https://stackoverflow.com/questions/1/how-to-undo';
 
 // 跑一次脚本。response 有值就是 http-response，否则是 http-request
 // deepl: 200 | 状态码；google: true | false
-function surge({ args = ARGS(), response, request, deepl = 200, google = true, store = {}, calls = [] }) {
+function surge({ args = ARGS(), response, request, deepl = 200, google = true, store = {}, calls = [], llm }) {
   const logs = [];
   return new Promise((resolve) => {
     const env = {
@@ -32,6 +33,7 @@ function surge({ args = ARGS(), response, request, deepl = 200, google = true, s
       $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
       $httpClient: {
         post(req, cb) {
+          if (fakeLlm(req, cb, calls, llm)) return;
           const b = JSON.parse(req.body);
           calls.push({ vendor: 'deepl', texts: b.text, tags: b.tag_handling, ignore: b.ignore_tags });
           if (deepl !== 200) return setTimeout(() => cb(null, { status: deepl }, '{}'));
@@ -168,7 +170,7 @@ async function main() {
     assert.deepStrictEqual(none.data.translations, [null], '都翻不了回 null');
 
     const status = await surge({ request: { url: 'https://stackoverflow.com/__surge-translate', method: 'GET' } });
-    assert.deepStrictEqual(JSON.parse(status.out.response.body), { module: 'ok', deepl: 'ok' }, 'GET 看状态');
+    assert.deepStrictEqual(JSON.parse(status.out.response.body), { module: 'ok', llm: '没填', deepl: 'ok' }, 'GET 看状态');
   }
 
   // ---- 网页 ----
@@ -283,6 +285,18 @@ async function main() {
   } finally {
     await browser.close();
   }
+  // ---- 大模型：网页送来页面标题，去掉「 - Stack Overflow」当上下文 ----
+  {
+    const calls = [];
+    const r = await surge({ args: ARGS('&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), calls, request: { url: 'https://stackoverflow.com/__surge-translate', method: 'POST',
+      body: JSON.stringify({ texts: ['Use <code>git reset</code> &amp; commit', '中文不翻'], title: 'How do I undo commits? - Stack Overflow' }) } });
+    assert.deepStrictEqual(JSON.parse(r.out.response.body).translations, ['模:Use <code>git reset</code> &amp; commit', '']);
+    const llm = calls.filter((c) => c.vendor === 'llm');
+    assert.ok(llm.length === 1 && !calls.some((c) => c.vendor === 'deepl'));
+    assert.strictEqual(llm[0].payload.question, 'How do I undo commits?');
+    console.log('ok  大模型：网页送来的段落带页面标题翻');
+  }
+
   console.log('stackoverflow-web: all tests passed');
 }
 

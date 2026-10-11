@@ -47,7 +47,6 @@ var LLM_CHARS = 600;                    // 一组最多多少字，组小一点�
 var LLM_ITEMS = 40;                     // 一组最多多少段
 var LLM_MIN_SECONDS = 3;                // 离截止不到这么多秒（限时很短时按一半）就不再开始新的一组
 var FALLBACK_SECONDS = 2;               // 离截止还剩这么多秒时，大模型没翻好的交给 DeepL / Google
-var LLM_TAG = 'llm#';                   // 缓存里大模型译文的前缀，兜底的译文不带
 var POST_KEY = 'reddit-last-post';      // 最近打开的帖子标题：评论有时单独一个响应，里面没有标题
 var POST_SECONDS = 600;                 // 帖子标题多久内还算数
 
@@ -65,11 +64,7 @@ function parseArgs(raw) {
   args.translate = /^(all|title|off)$/.test(args.translate) ? args.translate : 'all';
   args.budget = Math.min(20, Math.max(1, Number(args.budget) || 4));
   args.debug = args.debug === 'true';
-  // 占位文字（中文）会被滤掉，等于没填
-  args.llmKeyList = args.llmkeys.split(/[|,\s]+/).filter(function (k) { return /^[\x21-\x7e]{20,}$/.test(k); });
-  args.model = /^[\w.:\/-]+$/.test(args.model) ? args.model : 'gpt-4.1-mini';
-  args.api = /^https?:\/\/[^\s"]+$/i.test(args.api) ? args.api.replace(/\/+$/, '').replace(/\/chat\/completions$/, '') : 'https://api.openai.com/v1';
-  return args;
+  return parseLlmArgs(args);
 }
 
 var ARGS = parseArgs(typeof $argument === 'undefined' ? '' : $argument);
@@ -360,28 +355,6 @@ function deeplOnce(key, texts) {
   });
 }
 
-// 按顺序试 key：先用上次成功的那个，出错就换下一个。attempt(key) 返回 { ok, list } 或 { ok: false, status }。
-// slot 是状态里记「上次成功的 key」（指纹）的字段。返回 list，全部失败返回 null
-async function withKeys(keys, slot, state, attempt, minLeft) {
-  keys = keys.slice();
-  var start = keys.map(fingerprint).indexOf(state[slot]);
-  if (start > 0) keys = keys.slice(start).concat(keys.slice(0, start));
-  for (var i = 0; i < keys.length; i++) {
-    var key = keys[i];
-    if (state.paused[fingerprint(key)] > now()) continue;
-    if (remaining() < minLeft) return null;
-    var r = await attempt(key);
-    if (r.ok) {
-      state[slot] = fingerprint(key);
-      return r.list;
-    }
-    var pause = PAUSE[r.status] || (r.status >= 500 ? PAUSE[5] : 0);
-    log('key ' + fingerprint(key) + ' 失败，状态码 ' + r.status + (pause ? '，暂停 ' + pause + ' 秒' : ''));
-    if (pause) state.paused[fingerprint(key)] = now() + pause;
-  }
-  return null;
-}
-
 function deepl(texts, state) {
   return withKeys(ARGS.keyList, 'current', state, function (key) { return deeplOnce(key, texts); }, 0.5);
 }
@@ -497,6 +470,45 @@ async function translate(texts, state) {
 }
 
 // ---------- 大模型：OpenAI 或兼容 OpenAI 的接口 ----------
+// 这一段是 scripts/lib/llm.js 同步过来的，几个翻译脚本里都一样。要改就改 scripts/lib/llm.js，
+// 再跑 python3 tools/sync_llm.py，别在脚本里直接改。
+//
+// 用到脚本自己定义的：ARGS（keyList、fallback、target，以及 parseLlmArgs 加上的 llmKeyList、model、api）、
+// log、request、remaining、now、fingerprint、PAUSE、parallel(tasks, limit, run, minLeft)、loadState、saveState，
+// 常量 LLM_PARALLEL、LLM_CHARS、LLM_ITEMS、LLM_MIN_SECONDS、FALLBACK_SECONDS。
+// translateCached 默认还用 loadCache、saveCache、cacheKey 和 translate(texts, state)（DeepL + Google）。
+
+var LLM_TAG = 'llm#';  // 缓存里大模型译文的 key 前缀，兜底的译文不带
+
+// parseArgs 里调用：llmkeys、model、api 三个参数。占位文字（中文）会被滤掉，等于没填
+function parseLlmArgs(args) {
+  args.llmKeyList = String(args.llmkeys || '').split(/[|,\s]+/).filter(function (k) { return /^[\x21-\x7e]{20,}$/.test(k); });
+  args.model = /^[\w.:\/-]+$/.test(args.model || '') ? args.model : 'gpt-4.1-mini';
+  args.api = /^https?:\/\/[^\s"]+$/i.test(args.api || '') ? args.api.replace(/\/+$/, '').replace(/\/chat\/completions$/, '') : 'https://api.openai.com/v1';
+  return args;
+}
+
+// 按顺序试 key：先用上次成功的那个，出错就换下一个，并按错误暂停它。attempt(key) 返回 { ok, list } 或 { ok: false, status }。
+// slot 是状态里记「上次成功的 key」（只存指纹）的字段。返回 list，全部失败返回 null
+async function withKeys(keys, slot, state, attempt, minLeft) {
+  keys = keys.slice();
+  var start = keys.map(fingerprint).indexOf(state[slot]);
+  if (start > 0) keys = keys.slice(start).concat(keys.slice(0, start));
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    if (state.paused[fingerprint(key)] > now()) continue;
+    if (remaining() < minLeft) return null;
+    var r = await attempt(key);
+    if (r.ok) {
+      state[slot] = fingerprint(key);
+      return r.list;
+    }
+    var pause = PAUSE[r.status] || (r.status >= 500 ? PAUSE[5] : 0);
+    log('key ' + fingerprint(key) + ' 失败，状态码 ' + r.status + (pause ? '，暂停 ' + pause + ' 秒' : ''));
+    if (pause) state.paused[fingerprint(key)] = now() + pause;
+  }
+  return null;
+}
 
 var LANG_NAMES = {
   ZH: 'Simplified Chinese', 'ZH-HANS': 'Simplified Chinese', 'ZH-HANT': 'Traditional Chinese',
@@ -549,9 +561,11 @@ function llmOnce(key, system, payload, effort) {
 async function llmTranslate(system, payload, field, items, state) {
   var numbered = {};
   items.forEach(function (t, i) { numbered[i + 1] = t; });
-  payload[field] = numbered;
+  var body = {};
+  Object.keys(payload).forEach(function (k) { body[k] = payload[k]; });
+  body[field] = numbered;
   var effort = reasoningEffort(ARGS.model);
-  var reply = await withKeys(ARGS.llmKeyList, 'llm', state, function (key) { return llmOnce(key, system, payload, effort); }, 1);
+  var reply = await withKeys(ARGS.llmKeyList, 'llm', state, function (key) { return llmOnce(key, system, body, effort); }, 1);
   if (!reply || typeof reply !== 'object') return reply ? {} : null;
   // 有的模型会再包一层，比如 { "translations": { "1": … } }
   var names = Object.keys(reply);
@@ -564,12 +578,13 @@ async function llmTranslate(system, payload, field, items, state) {
   return out;
 }
 
-// 按字数分组：一组不超过 LLM_CHARS 字、LLM_ITEMS 条。大模型一组要好几秒，组小一点、多组同时翻更快
-function chunk(texts) {
+// 按字数分组：一组不超过 chars（默认 LLM_CHARS）字、LLM_ITEMS 段。大模型一组要好几秒，组小一点、多组同时翻更快
+function chunk(texts, chars) {
+  var limit = chars || LLM_CHARS;
   var groups = [];
   var g = null;
   texts.forEach(function (t) {
-    if (!g || g.texts.length >= LLM_ITEMS || (g.texts.length && g.size + t.length > LLM_CHARS)) {
+    if (!g || g.texts.length >= LLM_ITEMS || (g.texts.length && g.size + t.length > limit)) {
       g = { texts: [], size: 0 };
       groups.push(g);
     }
@@ -585,7 +600,7 @@ function sleep(seconds) {
 
 // 大模型先翻，DeepL / Google 兜底。各组同时翻，runGroup(组) 返回 { 原文: 译文 }，大模型用不了返回 null。
 // 离截止还剩 FALLBACK_SECONDS 秒时，还没翻好的（包括正在翻的）交给 fallback 先翻一版，大模型用不了就马上交。
-// 大模型晚到的结果照样用。返回 { best: 大模型的译文, rough: 兜底的译文 }
+// 大模型晚到的结果照样用，卡住的请求不等。返回 { best: 大模型的译文, rough: 兜底的译文 }
 async function llmFirst(groups, runGroup, fallback) {
   var best = {};
   var rough = {};
@@ -608,12 +623,15 @@ async function llmFirst(groups, runGroup, fallback) {
       rough = await fallback(left);
     }
   }
-  await Promise.race([llmDone, sleep(remaining())]);  // 卡住的请求不等，到截止就用手上有的
+  await Promise.race([llmDone, sleep(remaining())]);
   log('大模型翻好 ' + Object.keys(best).length + ' 段，兜底 ' + Object.keys(rough).length + ' 段');
-  return { best: best, rough: rough };
+  var out = { best: {}, rough: rough };
+  Object.keys(best).forEach(function (t) { out.best[t] = best[t]; });  // 截止后才到的不算
+  return out;
 }
 
-// 兜底：缓存里有上次兜底的译文就直接用，剩下的交给 translate(texts) → Promise<{ 原文: 译文 }>
+// 兜底：缓存里有上次兜底的译文就直接用，剩下的交给 translate(texts) → Promise<{ 原文: 译文 }>。
+// 没有 DeepL key 又关了 Google 兜底时返回 null
 function fallbackWith(rough, translate) {
   if (!ARGS.keyList.length && ARGS.fallback !== 'google') return null;
   return function (left) {
@@ -624,42 +642,98 @@ function fallbackWith(rough, translate) {
   };
 }
 
-function redditPrompt() {
-  var lang = targetName();
-  return 'You translate Reddit posts and comments into ' + lang + '.\n'
-    + 'Input is JSON: "post" is the title of the post this content belongs to (may be empty, e.g. on a feed), '
-    + '"texts" holds titles and paragraphs keyed by number, in page order. Consecutive paragraphs usually come from the same post or comment.\n'
-    + 'Use the post title and neighbouring paragraphs to understand the context, Reddit slang, abbreviations and jokes. '
-    + 'Translate each text into natural ' + lang + ', the way a native speaker would write it. Keep the tone, emoji, '
-    + 'u/ and r/ names, links and line breaks. Translate every text separately: do not merge, split or skip any, and do not add explanations.\n'
-    + 'Reply with a JSON object mapping each text number to its translation, with exactly the same keys and nothing else.';
+// 能不能翻：有大模型 key、DeepL key，或者开着 Google 兜底
+function canTranslateAny() { return ARGS.llmKeyList.length > 0 || ARGS.keyList.length > 0 || ARGS.fallback === 'google'; }
+
+// 查缓存，没有的去翻，翻好的存进缓存。返回 { 原文: 译文 }，没翻成的不在里面。
+// 用大模型时：texts 按顺序几段一组发给它，opts.system 是提示词，opts.context 是一起发过去的上下文（对象），
+// opts.field 是放文字的字段名（默认 texts）。大模型的译文缓存时 key 带 LLM_TAG；不带的是 DeepL / Google 的，
+// 用大模型时只拿来兜底，下次还会交给大模型重翻。
+// opts.load / save / key / translate 不填就用脚本里的 loadCache、saveCache、cacheKey、translate
+async function translateCached(texts, opts) {
+  var load = opts.load || loadCache;
+  var save = opts.save || saveCache;
+  var keyOf = opts.key || cacheKey;
+  var fallbackTranslate = opts.translate || translate;
+  var useLlm = ARGS.llmKeyList.length > 0;
+  var cache = load();
+  var known = {};
+  cache.forEach(function (e) { known[e[0]] = e[1]; });
+  var map = {};
+  var missing = [];
+  var rough = {};
+  texts.forEach(function (t) {
+    var k = keyOf(t);
+    var hit = known[(useLlm ? LLM_TAG : '') + k];
+    if (hit) map[t] = hit;
+    else missing.push(t);
+    if (!hit && useLlm && known[k]) rough[t] = known[k];
+  });
+  if (!missing.length) return map;
+  var state = loadState();
+  var fresh;
+  if (useLlm) {
+    log('用大模型翻 ' + missing.length + ' 段' + (opts.context ? '，上下文 ' + JSON.stringify(opts.context).slice(0, 120) : ''));
+    fresh = await llmFirst(chunk(missing, opts.chars), function (g) {
+      return llmTranslate(opts.system, opts.context || {}, opts.field || 'texts', g.texts, state);
+    }, fallbackWith(rough, function (need) { return fallbackTranslate(need, state); }));
+  } else {
+    fresh = { best: {}, rough: await fallbackTranslate(missing, state) };
+  }
+  saveState(state);
+  var added = 0;
+  Object.keys(fresh.rough).forEach(function (t) {
+    map[t] = fresh.rough[t];
+    if (!rough[t]) { cache.unshift([keyOf(t), fresh.rough[t]]); added++; }
+  });
+  Object.keys(fresh.best).forEach(function (t) {
+    map[t] = fresh.best[t];
+    cache.unshift([LLM_TAG + keyOf(t), fresh.best[t]]);
+    added++;
+  });
+  if (added) save(cache);
+  return map;
 }
 
-// 大模型的上下文：响应里只有一个帖子标题就是帖子页，记下来；好几个是信息流，不带；
-// 一个都没有（评论单独一个响应）就用刚才打开的帖子
-function postContext(jobs) {
-  var titles = jobs.filter(function (j) { return j.title; }).map(function (j) { return j.title.trim(); })
-    .filter(function (t, i, all) { return all.indexOf(t) === i; });
+// 页面的上下文（帖子、问题、Issue 的标题）：这个响应里只有一个标题就是详情页，记下来；
+// 好几个是列表，不带；一个都没有（评论、回答单独一个响应）就用 seconds 秒内刚打开的那个
+function pageContext(titles, storeKey, seconds) {
+  titles = titles.map(function (t) { return String(t).trim(); }).filter(function (t, i, all) { return t && all.indexOf(t) === i; });
   if (titles.length === 1) {
-    try { $persistentStore.write(JSON.stringify({ title: titles[0], at: now() }), POST_KEY); } catch (e) {}
+    try { $persistentStore.write(JSON.stringify({ title: titles[0], at: now() }), storeKey); } catch (e) {}
     return titles[0];
   }
   if (titles.length) return '';
   try {
-    var last = JSON.parse($persistentStore.read(POST_KEY) || '{}');
-    return last.title && now() - last.at < POST_SECONDS ? last.title : '';
+    var last = JSON.parse($persistentStore.read(storeKey) || '{}');
+    return last.title && now() - last.at < (seconds || 600) ? last.title : '';
   } catch (e) {
     return '';
   }
 }
 
-// 用大模型翻：几段一组同时翻，带上帖子标题。返回 { best: 大模型的译文, rough: 兜底的译文 }
-function translateWithLlm(texts, state, rough, post) {
-  var system = redditPrompt();
-  log('用大模型翻 ' + texts.length + ' 段，帖子：' + (post || '无'));
-  return llmFirst(chunk(texts), function (g) {
-    return llmTranslate(system, { post: post }, 'texts', g.texts, state);
-  }, fallbackWith(rough, function (need) { return translate(need, state); }));
+// 提示词：what 说明翻的是什么、上下文字段是什么意思；extra 是额外要求
+function llmPrompt(what, extra) {
+  var lang = targetName();
+  return 'You translate ' + what + ' into ' + lang + '.\n'
+    + (extra ? extra + '\n' : '')
+    + 'Translate each text into natural ' + lang + ', the way a native speaker would write it. Keep the tone, emoji, '
+    + 'names, @mentions, links and line breaks. Translate every text separately: do not merge, split or skip any, '
+    + 'and do not add explanations.\n'
+    + 'Reply with a JSON object mapping each text number to its translation, with exactly the same keys and nothing else.';
+}
+
+// 发过去的是简单 HTML（GitHub、Stack Overflow）时加上这句
+var HTML_RULE = 'Texts are small HTML snippets made of escaped text, <code>…</code> and <br>. Keep every <code> element '
+  + 'with its content unchanged, keep <br> where it is, keep HTML entities such as &lt; and &amp; escaped, '
+  + 'and translate only the text around them.';
+// ---------- 大模型结束 ----------
+
+function redditPrompt() {
+  return llmPrompt('Reddit posts and comments',
+    'Input is JSON: "post" is the title of the post this content belongs to (may be empty, e.g. on a feed), '
+    + '"texts" holds titles and paragraphs keyed by number, in page order. Consecutive paragraphs usually come from the same post or comment. '
+    + 'Use the post title and neighbouring paragraphs to understand the context, Reddit slang, abbreviations and jokes. Keep u/ and r/ names.');
 }
 
 // ---------- 主流程 ----------
@@ -676,47 +750,17 @@ async function main() {
   if (removed) log('删掉广告 ' + removed + ' 条');
   if (removed) adsRemoved = JSON.stringify(json);
 
-  var useLlm = ARGS.llmKeyList.length > 0;
-  var canTranslate = ARGS.translate !== 'off' && (useLlm || ARGS.keyList.length || ARGS.fallback === 'google');
+  var canTranslate = ARGS.translate !== 'off' && canTranslateAny();
   var jobs = canTranslate ? collectJobs(json) : [];
   if (jobs.length) log('找到 ' + jobs.length + ' 处要看的文字');
-  var post = useLlm && jobs.length ? postContext(jobs) : '';
+  var post = ARGS.llmKeyList.length && jobs.length ? pageContext(jobs.map(function (j) { return j.title || ''; }), POST_KEY, POST_SECONDS) : '';
   var texts = [];
   jobs.forEach(function (j) {
     j.texts.forEach(function (t) { if (texts.indexOf(t) === -1 && needsTranslation(t)) texts.push(t); });
   });
   var translated = 0;
   if (texts.length) {
-    var cache = loadCache();
-    var known = {};
-    cache.forEach(function (e) { known[e[0]] = e[1]; });
-    // 大模型的译文缓存时 key 前面加 LLM_TAG；不带的是 DeepL / Google 的，用大模型时只拿来兜底
-    var map = {};
-    var missing = [];
-    var rough = {};
-    texts.forEach(function (t) {
-      var k = cacheKey(t);
-      var hit = known[(useLlm ? LLM_TAG : '') + k];
-      if (hit) map[t] = hit;
-      else missing.push(t);
-      if (!hit && useLlm && known[k]) rough[t] = known[k];
-    });
-    if (missing.length) {
-      var state = loadState();
-      var fresh = useLlm ? await translateWithLlm(missing, state, rough, post) : { best: {}, rough: await translate(missing, state) };
-      saveState(state);
-      var added = 0;
-      Object.keys(fresh.rough).forEach(function (t) {
-        map[t] = fresh.rough[t];
-        if (!rough[t]) { cache.unshift([cacheKey(t), fresh.rough[t]]); added++; }
-      });
-      Object.keys(fresh.best).forEach(function (t) {
-        map[t] = fresh.best[t];
-        cache.unshift([LLM_TAG + cacheKey(t), fresh.best[t]]);
-        added++;
-      });
-      if (added) saveCache(cache);
-    }
+    var map = await translateCached(texts, { system: redditPrompt(), context: { post: post } });
     var byNorm = {};
     texts.forEach(function (t) {
       if (map[t] && map[t] !== t && norm(t)) byNorm[norm(t)] = map[t];
@@ -724,7 +768,7 @@ async function main() {
     var lookup = function (text) { var k = norm(text); return k ? byNorm[k] : undefined; };
     jobs.forEach(function (j) { translated += j.apply(lookup); });
     var left = texts.filter(function (t) { return !map[t]; }).length;
-    log('要翻 ' + texts.length + ' 段，缓存命中 ' + (texts.length - missing.length) + ' 段，用上 ' + translated + ' 段'
+    log('要翻 ' + texts.length + ' 段，用上 ' + translated + ' 段'
       + (left ? '，' + left + ' 段没翻完（超时或出错），重新打开会接着翻' : ''));
   }
   return removed || translated ? JSON.stringify(json) : null;

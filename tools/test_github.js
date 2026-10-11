@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const fakeLlm = require('./fake_llm');
 
 const CODE = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'github.js'), 'utf8');
 const K1 = '11111111-1111-1111-1111-111111111111:fx';
@@ -14,7 +15,7 @@ const ARGS = (extra = '') => `keys=${K1}&target=ZH-HANS&translate=all&markdown=f
 // 假 DeepL：<code>、标签、实体不动，其他文字转大写，前面加「译:」
 const fakeDeepl = (t) => '译:' + t.split(/(<code>[\s\S]*?<\/code>|<[^>]+>|&[#\w]+;)/).map((p, k) => (k % 2 ? p : p.toUpperCase())).join('');
 
-function run({ body, raw, url = 'https://api.github.com/graphql', headers = { 'Content-Type': 'application/json' }, args = ARGS(), deepl = 200, store = {} }) {
+function run({ body, raw, url = 'https://api.github.com/graphql', headers = { 'Content-Type': 'application/json' }, args = ARGS(), deepl = 200, store = {}, llm, llmCalls = [] }) {
   const calls = [];
   const logs = [];
   return new Promise((resolve) => {
@@ -25,6 +26,7 @@ function run({ body, raw, url = 'https://api.github.com/graphql', headers = { 'C
       $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
       $httpClient: {
         post(req, cb) {
+          if (fakeLlm(req, cb, llmCalls, llm)) return;
           const b = JSON.parse(req.body);
           calls.push(b.text);
           if (deepl !== 200) return setTimeout(() => cb(null, { status: deepl }, '{}'));
@@ -236,6 +238,22 @@ async function main() {
     const store = { 'github-translations': JSON.stringify([['ZH-HANS#' + text.length + '#' + h.toString(36), '译文<img src=x onerror=alert(1)><code>c</code>']]) };
     const r = await run({ body: { data: { node: comment('c1', '<p dir="auto">Please add dark mode</p>') } }, store });
     assert.strictEqual(r.json.data.node.bodyHTML, '<p dir="auto">Please add dark mode</p><p>译文<code>c</code></p>');
+  }
+
+  // ---- 大模型：带上仓库名和 Issue 标题；评论单独加载时用刚打开的 Issue；HTML 规则写进提示词 ----
+  {
+    const llmCalls = [];
+    const store = {};
+    const r = await run({ body: issuePage(), args: ARGS('&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), llmCalls, store });
+    assert.strictEqual(r.json.data.repository.issue.title, 'Crash when opening settings\n模:Crash when opening settings');
+    assert.strictEqual(r.calls.length, 0, '大模型翻完不用 DeepL');
+    assert.ok(llmCalls.length >= 1);
+    assert.deepStrictEqual([llmCalls[0].payload.repository, llmCalls[0].payload.title], ['acme/app', 'Crash when opening settings']);
+    assert.ok(llmCalls[0].system.includes('GitHub') && llmCalls[0].system.includes('<code>'), '提示词里说明 HTML 怎么处理');
+    const more = [];
+    await run({ url: 'https://api.github.com/repos/acme/app/issues/42/comments', body: [{ id: 9, body_html: '<p>Any update on this?</p>', body: 'Any update on this?', html_url: 'https://github.com/acme/app/issues/42#issuecomment-9' }], args: ARGS('&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), llmCalls: more, store });
+    assert.deepStrictEqual([more[0].payload.repository, more[0].payload.title], ['acme/app', 'Crash when opening settings']);
+    console.log('ok  大模型：带仓库名和 Issue 标题，评论单独加载也知道是哪个 Issue');
   }
 
   console.log('github: all tests passed');

@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const fakeLlm = require('./fake_llm');
 
 const CODE = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'x.js'), 'utf8');
 const K1 = '11111111-1111-1111-1111-111111111111:fx';
@@ -13,7 +14,7 @@ const TR = (extra = '') => ARGS('&translate=all&keys=' + K1 + '&target=ZH-HANS&f
 const URL = (op, vars) => `https://x.com/i/api/graphql/abc123/${op}` + (vars ? '?variables=' + encodeURIComponent(JSON.stringify(vars)) : '');
 
 // deepl: 200 | 状态码 | 'hang'；google: true | false
-function run({ body, url = URL('HomeTimeline'), args = ARGS(), deepl = 200, google = true, store = {} }) {
+function run({ body, url = URL('HomeTimeline'), args = ARGS(), deepl = 200, google = true, store = {}, llm }) {
   const calls = [];
   const logs = [];
   return new Promise((resolve) => {
@@ -24,6 +25,7 @@ function run({ body, url = URL('HomeTimeline'), args = ARGS(), deepl = 200, goog
       $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
       $httpClient: {
         post(req, cb) {
+          if (fakeLlm(req, cb, calls, llm)) return;
           const b = JSON.parse(req.body);
           calls.push({ vendor: 'deepl', texts: b.text });
           if (deepl === 'hang') return;
@@ -403,6 +405,21 @@ const legacyOf = (json, i) => {
   assert.ok(logs.some((l) => l.includes('没找到带 entryId 的条目') && l.includes('{data:{feed:{items:[{id:number}]}}}')), logs.join('\n'));
   const bin = await run({ args: ARGS('&debug=true'), url: 'https://api.x.com/graphql/a/HomeTimeline', body: '\u0000\u0001binary' });
   assert.ok(bin.logs.some((l) => l.includes('HomeTimeline 不是 JSON')), bin.logs.join('\n'));
+}
+
+// 20. 大模型：推文按页面顺序几条一组发过去，带上是哪个页面；用不了马上换 DeepL
+{
+  const body = () => home([entry('tweet-1', tweet('1', 'Hello world, this is great')), entry('tweet-3', tweet('3', '今日はいい天気ですね', { lang: 'ja' }))]);
+  const { json, calls } = await run({ args: TR('&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), body: body() });
+  assert.strictEqual(legacyOf(json, 0).full_text, 'Hello world, this is great\n\n模:Hello world, this is great');
+  assert.strictEqual(legacyOf(json, 1).full_text, '今日はいい天気ですね\n\n模:今日はいい天気ですね');
+  const llm = calls.filter((c) => c.vendor === 'llm');
+  assert.ok(llm.length === 1 && !calls.some((c) => c.vendor === 'deepl'), '大模型翻完不用 DeepL');
+  assert.strictEqual(llm[0].payload.page, 'HomeTimeline');
+  assert.ok(llm[0].system.includes('X / Twitter') && llm[0].system.includes('Simplified Chinese'));
+  const down = await run({ args: TR('&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), body: body(), llm: { status: 401 } });
+  assert.strictEqual(legacyOf(down.json, 0).full_text, 'Hello world, this is great\n\n译:Hello world, this is great');
+  console.log('ok  20. 大模型翻推文，带页面类型；大模型用不了马上换 DeepL');
 }
 
 console.log('x.js: all tests passed');

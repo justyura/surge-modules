@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const fakeLlm = require('./fake_llm');
 
 const CODE = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'youtube-subtitles.js'), 'utf8');
 const K1 = '11111111-1111-1111-1111-111111111111:fx';
@@ -18,25 +19,7 @@ function fakeDeepl(text, xml, mode) {
   return text.replace(/<t>([\s\S]*?)<\/t>/g, '<t>译:$1</t>');
 }
 
-// 假的大模型（OpenAI Chat Completions）：把 lines / comments 里每一段加上「模:」。
-// llm = { status: 200 | 状态码 | 'hang', latency, drop: 漏掉的编号, wrap: true（多包一层）, error: 出错时的 body }
 const OEMBED = { vid1: 'Fixing a squeaky door — Handy Dan', dQw4w9WgXcQ: 'Never Gonna Give You Up — Rick Astley' };
-function fakeLlm(req, cb, calls, llm = {}) {
-  const b = JSON.parse(req.body);
-  const payload = JSON.parse(b.messages[1].content);
-  const field = payload.lines ? 'lines' : 'comments';
-  calls.push({ vendor: 'llm', url: req.url, key: req.headers.Authorization.replace('Bearer ', ''), model: b.model, effort: b.reasoning_effort,
-    format: b.response_format.type, system: b.messages[0].content, payload, n: Object.keys(payload[field]).length });
-  const status = llm.status ?? 200;
-  if (status === 'hang') return;
-  setTimeout(() => {
-    if (status !== 200) return cb(null, { status }, llm.error || '{"error":{"message":"err"}}');
-    let out = {};
-    for (const [k, v] of Object.entries(payload[field])) if (k !== String(llm.drop)) out[k] = '模:' + v;
-    if (llm.wrap) out = { translations: out };
-    cb(null, { status: 200 }, JSON.stringify({ choices: [{ message: { content: JSON.stringify(out) } }] }));
-  }, llm.latency || 0);
-}
 function fakeOembed(req, cb, calls) {
   const id = /watch%3Fv%3D([\w-]+)/.exec(req.url)[1];
   calls.push({ vendor: 'oembed', id });
@@ -63,7 +46,7 @@ function run({ url, body, args, behavior = {}, store = {}, google = true, latenc
             if (vocab === 'down') return setTimeout(() => cb('connection refused', null, null));
             return setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ words: vocab })));
           }
-          if (req.url.endsWith('/chat/completions')) return fakeLlm(req, cb, calls, llm);
+          if (fakeLlm(req, cb, calls, llm)) return;
           const key = req.headers.Authorization.replace('DeepL-Auth-Key ', '');
           const b = JSON.parse(req.body);
           const xml = b.tag_handling === 'xml';
@@ -182,7 +165,7 @@ function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dz
             const reply = typeof upstream === 'number' ? new Uint8Array(0) : new Uint8Array(upstream);
             return setTimeout(() => cb(null, { status: typeof upstream === 'number' ? upstream : 200, headers: { 'Content-Type': 'application/x-protobuf', 'Content-Encoding': 'gzip', 'Content-Length': '1' } }, reply));
           }
-          if (req.url.endsWith('/chat/completions')) return fakeLlm(req, cb, calls, llm);
+          if (fakeLlm(req, cb, calls, llm)) return;
           const key = req.headers.Authorization.replace('DeepL-Auth-Key ', '');
           const b = JSON.parse(req.body);
           calls.push({ vendor: 'deepl', key, n: b.text.length, xml: b.tag_handling === 'xml', source: b.source_lang });

@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const fakeLlm = require('./fake_llm');
 
 const CODE = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'reddit.js'), 'utf8');
 const K1 = '11111111-1111-1111-1111-111111111111:fx';
@@ -12,7 +13,7 @@ const ARGS = (extra = '', keys = K1) => `keys=${keys}&target=ZH-HANS&translate=a
 
 // behavior: 200 | 状态码 | 'hang'；google: true | false
 // google: true | false | 'merge'（多行合成一行返回，行数对不上）
-// llm: 假的大模型 { status: 200 | 状态码, latency }，把 texts 里每段加上「模:」
+// llm: 假的大模型的行为，见 tools/fake_llm.js
 function run({ body, args = ARGS(), behavior = 200, google = true, store = {}, latency = 0, llm = {} }) {
   const calls = [];
   const logs = [];
@@ -25,15 +26,8 @@ function run({ body, args = ARGS(), behavior = 200, google = true, store = {}, l
       $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
       $httpClient: {
         post(req, cb) {
+          if (fakeLlm(req, cb, calls, llm)) return;
           const b = JSON.parse(req.body);
-          if (req.url.endsWith('/chat/completions')) {
-            const payload = JSON.parse(b.messages[1].content);
-            calls.push({ vendor: 'llm', model: b.model, system: b.messages[0].content, payload });
-            const status = llm.status ?? 200;
-            if (status !== 200) return setTimeout(() => cb(null, { status }, '{"error":{"message":"err"}}'));
-            const out = Object.fromEntries(Object.entries(payload.texts).map(([k, v]) => [k, '模:' + v]));
-            return setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ choices: [{ message: { content: JSON.stringify(out) } }] })), llm.latency || 0);
-          }
           calls.push({ vendor: 'deepl', texts: b.text, source: b.source_lang });
           if (behavior === 'hang') return;
           if (behavior !== 200) return setTimeout(() => cb(null, { status: behavior }, '{}'));

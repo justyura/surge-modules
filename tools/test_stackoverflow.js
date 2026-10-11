@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const fakeLlm = require('./fake_llm');
 
 const CODE = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'stackoverflow.js'), 'utf8');
 const K1 = '11111111-1111-1111-1111-111111111111:fx';
@@ -15,7 +16,7 @@ const ARGS = (extra = '') => `keys=${K1}&target=ZH-HANS&translate=all&fallback=g
 const fakeDeepl = (t) => '译:' + t.split(/(<code>[\s\S]*?<\/code>|<[^>]+>|&[#\w]+;)/).map((p, k) => (k % 2 ? p : p.toUpperCase())).join('');
 
 // deepl: 200 | 状态码 | 'hang'；google: true | false
-function run({ body, args = ARGS(), deepl = 200, google = true, store = {}, raw }) {
+function run({ body, args = ARGS(), deepl = 200, google = true, store = {}, raw, llm }) {
   const calls = [];
   const logs = [];
   return new Promise((resolve) => {
@@ -26,6 +27,7 @@ function run({ body, args = ARGS(), deepl = 200, google = true, store = {}, raw 
       $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
       $httpClient: {
         post(req, cb) {
+          if (fakeLlm(req, cb, calls, llm)) return;
           const b = JSON.parse(req.body);
           calls.push({ vendor: 'deepl', texts: b.text, tags: b.tag_handling, ignore: b.ignore_tags });
           if (deepl === 'hang') return;
@@ -256,6 +258,23 @@ async function main() {
     const r = await run({ raw, args: ARGS('&budget=10') });
     console.log('真实响应：', r.logs.filter((l) => /要翻|只翻/.test(l)).join(' / '));
     assert.ok(r.json, '真实响应翻译了');
+  }
+
+  // ---- 大模型：带上问题标题；回答单独加载时用刚打开的问题；用不了马上换 DeepL ----
+  {
+    const store = {};
+    const r = await run({ body: questionPage(), args: ARGS('&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), store });
+    const q = r.json.items[0];
+    assert.strictEqual(q.title, 'How do I undo the &quot;most recent&quot; commits?\n模:How do I undo the &quot;most recent&quot; commits?');
+    const llm = r.calls.filter((c) => c.vendor === 'llm');
+    assert.ok(llm.length >= 1 && !r.calls.some((c) => c.vendor === 'deepl'), '大模型翻完不用 DeepL');
+    assert.strictEqual(llm[0].payload.question, 'How do I undo the &quot;most recent&quot; commits?');
+    assert.ok(llm[0].system.includes('Stack Overflow') && llm[0].system.includes('<code>'));
+    const answers = await run({ body: { items: [{ answer_id: 77, question_id: 1, body: '<p>Use git reset instead.</p>' }] }, args: ARGS('&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), store });
+    assert.strictEqual(answers.calls.find((c) => c.vendor === 'llm').payload.question, 'How do I undo the &quot;most recent&quot; commits?', '回答用刚打开的问题标题');
+    const down = await run({ body: questionPage(), args: ARGS('&llmkeys=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&budget=6'), llm: { status: 401 } });
+    assert.ok(down.json.items[0].title.includes('译:'), '大模型用不了用 DeepL');
+    console.log('ok  大模型：带问题标题，回答单独加载也知道是哪个问题，用不了马上换 DeepL');
   }
 
   console.log('stackoverflow: all tests passed');
