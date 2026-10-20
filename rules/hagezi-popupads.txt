@@ -7,7 +7,7 @@
 # License: https://github.com/hagezi/dns-blocklists/blob/main/LICENSE
 # Issues: https://github.com/hagezi/dns-blocklists/issues
 # Disclaimer: https://github.com/hagezi/dns-blocklists/blob/main/README.md#disclaimer
-# Number of entries: 47691
+# Number of entries: 47715
 #
 .fd01ce9a02.0012e30263.com
 .0db65504c2.012dadaa06.com
@@ -763,6 +763,8 @@
 .bykj.com.cn
 .cdragon.com.cn
 .ch-qishui-music.com.cn
+.changelly.com.lc
+.changelly.com.mx
 .commissionfactory.com.au
 .constructaus.com.au
 .cpdc.com.cn
@@ -845,6 +847,7 @@
 .todeskappa.com.cn
 .tranyasy.com.cn
 .tronlink.com.co
+.us-changelly.com.co
 .vertiselevadores.com.br
 .viajedu.com.br
 .vjp.com.cn
@@ -2094,6 +2097,7 @@
 .cart.net.cn
 .favicon.net.cn
 .jjsf.net.cn
+.ledger.net.cn
 .qilao.net.cn
 .saiao.net.cn
 .sbw.net.cn
@@ -2287,7 +2291,6 @@
 .hw.panaceoutlash.com
 .click.pandaspins.com
 .fv.panoanmyases.top
-.go.panotads.com
 .dev-7614646544.pantheonsite.io
 .wt.papelonkokoona.com
 .nice.par-even.com
@@ -2320,6 +2323,7 @@
 .al.perriessmeech.com
 .rq.pettahgurr.com
 .xj.pettlesmethol.com
+.app.phantomlocal.com
 .zy.phasedcleft.com
 .zw.phasingsollya.com
 .me.phoceanoyez.com
@@ -9850,7 +9854,6 @@
 .aiqinzhubao.com
 .air-look-send.com
 .air-we4.com
-.airairgu.com
 .airbornemiser.com
 .airbornepensioneradversary.com
 .aircaredallas.com
@@ -10780,6 +10783,7 @@
 .apostleurban.com
 .apostrophesubdued.com
 .app-aplell.com
+.app-changelly.net
 .app-gala-games-online-3yhh6.com
 .app-gamesonline-9zhq.com
 .app-momentum.com
@@ -10892,6 +10896,7 @@
 .aqfawlrhik.in
 .aqhz.xyz
 .aqiongxlma.com
+.aqkdmicibfav.in
 .aqkkoalfpz.com
 .aqkqlshhyfmbf.store
 .aqle3.com
@@ -11334,6 +11339,7 @@
 .atewig.com
 .atgmzemuf.com
 .atgogmvi.com
+.atgpwurifh.in
 .atgvmlnbtnlxl.website
 .atheatmorchan.com
 .atheegrun.net
@@ -11856,7 +11862,6 @@
 .azzpkuvm.in
 .b-7.jp
 .b-m.xyz
-.b-short.link
 .b-withyou.com
 .b00m.site
 .b02byun5xc3s.com
@@ -12817,6 +12822,7 @@
 .billypub.com
 .bilsoaphaik.net
 .bilsyndication.com
+.biltemadk.com
 .bimbim.com
 .bin-layer.de
 .bin-tds.site
@@ -13140,6 +13146,7 @@
 .blushinghappilyberenice.com
 .blusterflintbig.com
 .blusterhawspontaneous.com
+.blxcrbaopbvvxk.com
 .blzz.xyz
 .bm-bluemoon.com
 .bmadss.com
@@ -13487,6 +13494,7 @@
 .boyiinlove.com
 .boymagicdate.com
 .boyunakylie.com
+.bp44bqnvdb.com
 .bp7mb11.top
 .bpabmyodbtav.com
 .bparcizapowm.com
@@ -13766,6 +13774,7 @@
 .brut.ooo
 .brutalmathematics.com
 .bruteportrait.com
+.brutishlyfantasizeretorted.com
 .brutishlylifevoicing.com
 .brxcioxve.com
 .brxqstnvd.com
@@ -14885,6 +14894,7 @@
 .changeablecats.com
 .changedevelopmentpeacock.com
 .changeflamboyant.com
+.changelly-en.at
 .changely.at
 .changengoaxolt.net
 .changeofmarylebone.com
@@ -16870,6 +16880,7 @@
 .cursorslibrary.com
 .curtainscountingsnitch.com
 .curtalreinvigorateauthority.com
+.curtalsunipods.cfd
 .curtcoracii.com
 .curve-flnance.com
 .curvedheldideal.com
@@ -17667,6 +17678,7 @@
 .demolishovercoat.com
 .demolishwrestconclusions.com
 .demolitionnutsgrease.com
+.demonhunterz.com
 .demonstrationleadershippatriot.com
 .demonstudent.com
 .demotearrogancegroin.com
@@ -18782,7 +18794,6 @@
 .dspultra.com
 .dsraozxhfuifo.site
 .dsreviews.net
-.dstillery.com
 .dsu-adguard.pro
 .dsucpnsfxip.com
 .dsultra.com
@@ -19624,6 +19635,7 @@
 .emulationfastened.com
 .emxdgt.com
 .en-ledger.com
+.en-leger.org
 .en-mu-su-bi.com
 .en7788.com
 .enabledpeople.com
@@ -21867,6 +21879,7 @@
 .fudzceoandzhm.website
 .fuelburns.com
 .fuettjbytxvy.com
+.fugitivequilt.com
 .fuglaizid.net
 .fugsslosher.com
 .fuhrerstanking.com
@@ -27415,6 +27428,7 @@
 .kidomax.com
 .kidsboilingbeech.com
 .kidsevqhaudoi.store
+.kihkudwal.in
 .kihudevo.pro
 .kijia.com
 .kikmpahfaj.com
@@ -28256,6 +28270,7 @@
 .lecubzcgozcgk.one
 .ledeedaugh.com
 .ledgeadmitted.com
+.ledger-nano.com
 .leedagauluz.net
 .leedsneurite.com
 .leeglaipepoa.com
@@ -29134,6 +29149,7 @@
 .lrucqhpa.com
 .lrwtsfkv.net
 .lryocmakbqri.com
+.lryojqlp.in
 .lrziloubgdcfe.online
 .lsefbdrript.xyz
 .lsiszlerwgure.store
@@ -30254,6 +30270,7 @@
 .mgladthereisso.com
 .mgm50.com
 .mgmecngr.com
+.mgmylc.cc
 .mgptijzevfuxj.space
 .mgrafmxbsgjma.store
 .mgsnicqdeydae.space
@@ -32178,6 +32195,7 @@
 .npcta.xyz
 .npdhwhkrn.com
 .npiramqanr.com
+.npitaqvuwci.in
 .npjsottvkqob.com
 .npmkmnkjy.com
 .npmnavtmhpxf.com
@@ -33334,6 +33352,7 @@
 .opzwfuhi.com
 .oqbotdowrcr.in
 .oqbowztarb.com
+.oqbzwuamhwfy.in
 .oqdgibwa.com
 .oqdjincce.com
 .oqfgyyjtodioh.com
@@ -34159,6 +34178,7 @@
 .pathwayslife.care
 .patienceinfluxdemon.com
 .patientsaustralia.com
+.patozdkidh.in
 .patpkutfij.in
 .patrickhalks.com
 .patricksbutcherboyburgers.com
@@ -37169,6 +37189,7 @@
 .reaujwzwzkdih.store
 .rebakebelage.com
 .rebateai.com
+.rebaterrecoupe.cyou
 .rebelhen.com
 .rebelliousallyprohibited.com
 .rebelloworks.com
@@ -41019,6 +41040,7 @@
 .suggestionbridge.com
 .suggestionswear.com
 .suggilzanza.com
+.sugochanloxl.in
 .suguaitaina.com
 .suguao.net
 .suguap.net
@@ -42848,6 +42870,7 @@
 .treoppom.in
 .trepolan.com
 .trezor.la
+.trezor-uk.at
 .trezorsafety.com
 .trezorsuite.at
 .trfcbooost.com
@@ -43779,6 +43802,7 @@
 .uoxmdhdsg.com
 .uoxocwxakddyq.space
 .up-community.wiki
+.up-ledger.com
 .up-loop.net
 .upagqmxqvipry.com
 .uparceuson.com
