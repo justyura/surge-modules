@@ -55,6 +55,7 @@ var DOC_CHARS = 420;             // 整句文稿一段大约多少字
 var DOC_MAX_CHARS = 650;
 var DOC_PACK_CHARS = 4000;       // 文稿几段打包成一次 DeepL 请求
 var DOC_BUDGET = 25;             // 文稿最多翻几秒，没翻完的刷新接着翻
+var CLAUDE_URL_CHARS = 40000;    // 原文编码后超过这么长就不塞进 Claude 的链接，改成先复制再粘贴
 var TEXTS_PER_REQUEST = 50;      // DeepL 一次最多 50 段
 var BYTES_PER_REQUEST = 100000;  // DeepL 单次请求上限 128 KiB，留点余量
 var PARALLEL = 3;                // 同时发几个请求
@@ -1363,7 +1364,7 @@ function page(title, inner) {
     + 'h1{font-size:20px;margin:0 0 4px}p{color:var(--muted);margin:0 0 16px}'
     + 'a.b,button{display:block;width:100%;box-sizing:border-box;margin:0 0 10px;padding:12px;border:0;border-radius:10px;background:var(--card);color:var(--fg);font:inherit;text-align:center;text-decoration:none}'
     + '.doc{margin-top:16px}.doc p{color:var(--fg);margin:0 0 6px}.doc p.zh{margin:0 0 22px;color:var(--muted)}'
-    + 'a.b.main{background:var(--accent);color:#fff}pre{white-space:pre-wrap;background:var(--card);padding:12px;border-radius:10px;font-size:14px}'
+    + 'a.b.main,button.main{background:var(--accent);color:#fff}pre{white-space:pre-wrap;background:var(--card);padding:12px;border-radius:10px;font-size:14px}'
     + '</style></head><body>' + inner + '</body></html>';
 }
 
@@ -1478,6 +1479,20 @@ function docText(doc) {
   return doc.paras.map(function (p, i) { return doc.zh[i] ? p + '\n' + doc.zh[i] : p; }).join('\n\n') + '\n';
 }
 
+// 原文：碎片字幕合成的段落，只有英文（或原来的语言），不用翻译
+function originalText(entry) {
+  return buildParagraphs(entry.cues).join('\n\n') + '\n';
+}
+
+// 在 Claude App 里开一个新对话、把原文填进输入框（claude://claude.ai/new?q=，非官方但能用）。
+// 太长放不进链接就只填一句提示，原文靠剪贴板
+function claudeUrl(title, text) {
+  var head = (title ? 'YouTube 视频「' + title + '」的字幕原文：' : 'YouTube 视频的字幕原文：') + '\n\n';
+  var full = encodeURIComponent(head + text);
+  if (full.length <= CLAUDE_URL_CHARS) return 'claude://claude.ai/new?q=' + full;
+  return 'claude://claude.ai/new?q=' + encodeURIComponent(head + '（原文太长放不进链接，已经复制到剪贴板，长按这里粘贴）\n\n');
+}
+
 async function exportMain() {
   var url = $request.url;
   var v = param(url, 'v');
@@ -1492,6 +1507,13 @@ async function exportMain() {
   var mode = /^(both|original|translation)$/.test(param(url, 'mode')) ? param(url, 'mode') : 'both';
   var fmt = param(url, 'fmt');
   var name = entry.v + '.' + (entry.lang || 'sub') + (mode === 'both' ? '.' + entry.target.toLowerCase() : mode === 'translation' ? '.' + entry.target.toLowerCase() + '-only' : '');
+  var plain = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' };
+  // 给快捷指令用：原文纯文本、打开 Claude 的链接
+  if (fmt === 'original') return { response: { status: 200, headers: plain, body: originalText(entry) } };
+  if (fmt === 'claudeurl') {
+    var title = entry.v === 'latest' ? '' : await videoInfo(entry.v);
+    return { response: { status: 200, headers: plain, body: claudeUrl(title, originalText(entry)) } };
+  }
   if (fmt === 'srt') {
     return { response: { status: 200, headers: {
       'Content-Type': 'application/x-subrip; charset=utf-8',
@@ -1533,15 +1555,22 @@ async function exportMain() {
       + link('both', 'txt', '查看双语纯文本') + link('original', 'txt', '查看原文纯文本')
     : link('original', 'srt', '下载 SRT') + link('original', 'txt', '查看纯文本'));
   var preview = entry.cues.slice(0, 6).map(function (c) { return escapeHtml(cueText(c, 'both')); }).join('\n\n');
-  var all = JSON.stringify(toText(entry.cues, translated ? 'both' : 'original')).replace(/</g, '\\u003c');
+  var json = function (value) { return JSON.stringify(value).replace(/</g, '\\u003c'); };
+  var original = originalText(entry);
+  var claude = claudeUrl(entry.v === 'latest' ? '' : await videoInfo(entry.v), original);
   return { response: { status: 200, headers: html, body: page('导出字幕', '<h1>导出字幕</h1>'
     + '<p>视频 ' + escapeHtml(entry.v) + ' · ' + escapeHtml(entry.lang || '未知语言') + ' · ' + entry.cues.length + ' 句'
     + (translated ? '，译文 ' + translated + ' 句' : '，没有译文') + '</p>'
+    + '<button id="claude" class="main">在 Claude 中打开原文</button>'
+    + '<button id="orig">复制原文</button>'
     + buttons
-    + '<button id="copy">复制全部文字</button>'
+    + '<button id="copy">复制双语文字</button>'
     + '<pre>' + preview + (entry.cues.length > 6 ? '\n\n…' : '') + '</pre>'
-    + '<script>var all=' + all + ';document.getElementById("copy").onclick=function(){var b=this;'
-    + 'navigator.clipboard.writeText(all).then(function(){b.textContent="已复制"},function(){b.textContent="复制失败，用上面的「查看纯文本」"})}</script>') } };
+    + '<script>var original=' + json(original) + ',all=' + json(toText(entry.cues, translated ? 'both' : 'original')) + ',claude=' + json(claude) + ';'
+    + 'function copy(id,text,done){document.getElementById(id).onclick=function(){var b=this;'
+    + 'navigator.clipboard.writeText(text).then(function(){done?done():b.textContent="已复制"},function(){done?done():b.textContent="复制失败，用「查看纯文本」"})}}'
+    // 先把原文放进剪贴板（太长进不了链接时用得上），再打开 Claude
+    + 'copy("claude",original,function(){location.href=claude});copy("orig",original);copy("copy",all);</script>') } };
 }
 
 // ---------- 主流程 ----------

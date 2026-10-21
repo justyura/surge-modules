@@ -828,6 +828,31 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  评论只用 DeepL 时也带视频标题当上下文');
   }
 
+  // 17h. 原文和 Claude：复制原文是合成段落的英文；在 Claude 中打开用 claude://claude.ai/new?q=，带视频标题；
+  // 给快捷指令的两个地址直接返回文字；太长就只在链接里放提示，原文靠剪贴板；都不用翻译
+  {
+    const store = {};
+    const lines = Array.from({ length: 30 }, (_, i) => `talking point ${i} goes here`);
+    await run({ url: URL_EN, body: json3(lines), args: ARGS(K1), store });
+    const original = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=original', store);
+    assert.ok(original.headers['Content-Type'].startsWith('text/plain'));
+    assert.strictEqual(original.body.replace(/\n\n/g, ' ').trim(), lines.join(' '), '原文就是全部字幕，合成段落');
+    const link = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=claudeurl', store);
+    assert.ok(link.body.startsWith('claude://claude.ai/new?q='));
+    assert.strictEqual(decodeURIComponent(link.body.slice('claude://claude.ai/new?q='.length)), 'YouTube 视频「Fixing a squeaky door — Handy Dan」的字幕原文：\n\n' + original.body);
+    const page = await runExport('https://yt-subtitles.internal/?v=vid1', store);
+    assert.ok(page.body.includes('在 Claude 中打开原文') && page.body.includes('复制原文') && page.body.includes(JSON.stringify(link.body)));
+    for (const r of [original, link, page]) assert.ok(!r.calls.some((c) => c.vendor === 'deepl' || c.vendor === 'google'), '不用翻译');
+
+    // 很长的视频：链接里只放提示
+    const longStore = {};
+    const many = Array.from({ length: 4000 }, (_, i) => `a fairly long line of speech number ${i}`);
+    await run({ url: URL_EN.replace('vid1', 'long1'), body: json3(many), args: ARGS('', '&fallback=off'), store: longStore });
+    const longLink = await runExport('https://yt-subtitles.internal/?v=long1&fmt=claudeurl', longStore);
+    assert.ok(longLink.body.length < 1000 && decodeURIComponent(longLink.body).includes('已经复制到剪贴板'));
+    console.log('ok  复制原文、在 Claude 中打开（带标题，太长改用剪贴板），给快捷指令的地址直接返回文字');
+  }
+
   // 18. 导出的时间轴：srv3（毫秒）、srv1（秒）、WebVTT；自动字幕重叠的结束时间截到下一句
   {
     const store = {};
