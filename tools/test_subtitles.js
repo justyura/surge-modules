@@ -853,6 +853,20 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  复制原文、在 Claude 中打开（带标题，太长改用剪贴板），给快捷指令的地址直接返回文字');
   }
 
+  // 17i. 记下实际用了哪个翻译，给「翻译状态」面板看：DeepL 额度用完转 Google 也记清楚；全走缓存不记
+  {
+    const store = {};
+    await run({ url: URL_EN.replace('vid1', 'use1'), body: json3(['First', 'Second']), args: ARGS(K1), behavior: { [K1]: 456 }, store });
+    const rec = JSON.parse(store['translate-usage'])[0];
+    assert.strictEqual(rec.what, '字幕');
+    assert.deepStrictEqual(rec.engines, { deepl: { ok: 0, fail: 1, last: 456 }, google: { ok: 1, fail: 0, last: 0 } });
+    await run({ url: URL_EN.replace('vid1', 'use1'), body: json3(['First', 'Second']), args: ARGS(K1), store });
+    assert.strictEqual(JSON.parse(store['translate-usage']).length, 1, '全走缓存不记');
+    const c = await runComments({ upstream: commentsPb(COMMENTS), store });
+    assert.strictEqual(JSON.parse(c.store['translate-usage'])[0].what, '评论');
+    console.log('ok  记下每次实际用了 DeepL 还是 Google（失败原因也记），全走缓存不记');
+  }
+
   // 18. 导出的时间轴：srv3（毫秒）、srv1（秒）、WebVTT；自动字幕重叠的结束时间截到下一句
   {
     const store = {};

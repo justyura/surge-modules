@@ -12,16 +12,27 @@ const L1 = 'sk-test-1111111111111111111111';
 const L2 = 'sk-test-2222222222222222222222';
 const GOOD = JSON.stringify({ 1: '然后所有人都冲向银行', 2: '同时把钱取出来' });
 
-// llm[key] = fake_llm 的设置，按 key 分开
-function run(args, llm = {}) {
+const D1 = '11111111-1111-1111-1111-111111111111:fx';
+const D2 = '22222222-2222-2222-2222-222222222222';
+
+// llm[key] = fake_llm 的设置，按 key 分开；deepl[key] = { used, limit } 或状态码；store = $persistentStore 里的内容
+function run(args, llm = {}, { deepl = {}, store = {} } = {}) {
   const calls = [];
   return new Promise((resolve) => {
     const env = {
       $argument: args,
+      $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
       $httpClient: {
         post(req, cb) {
           const key = req.headers.Authorization.replace('Bearer ', '');
           assert.ok(fakeLlm(req, cb, calls, llm[key] || {}));
+        },
+        get(req, cb) {
+          const key = req.headers.Authorization.replace('DeepL-Auth-Key ', '');
+          calls.push({ vendor: 'deepl-usage', key, url: req.url });
+          const how = deepl[key] ?? { used: 0, limit: 500000 };
+          if (typeof how === 'number') return setTimeout(() => cb(null, { status: how }, '{}'));
+          setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ character_count: how.used, character_limit: how.limit })));
         },
       },
       $done: (panel) => resolve({ panel, calls }),
@@ -32,12 +43,55 @@ function run(args, llm = {}) {
 }
 
 (async () => {
-  // 1. 没填 key
+  // 1. 什么 key 都没填：只有 Google 兜底；连兜底都关了就是用不了
   {
-    const { panel, calls } = await run('llmkeys=填你的OpenAI密钥&model=gpt-6-luna&effort=auto&target=ZH-HANS');
-    assert.ok(panel.title.includes('没填大模型密钥'));
-    assert.strictEqual(calls.length, 0);
-    console.log('ok  没填 key：提示去填，不发请求');
+    const { panel, calls } = await run('keys=可以不填&llmkeys=填你的OpenAI密钥&model=gpt-6-luna&effort=auto&target=ZH-HANS');
+    assert.strictEqual(panel.title, '翻译状态 · Google');
+    assert.ok(panel.content.startsWith('在用：Google（没填 DeepL 和大模型的 key）'), panel.content);
+    assert.ok(panel.content.includes('最近：还没有翻译记录'));
+    assert.strictEqual(calls.length, 0, '不测大模型、不查 DeepL');
+    const off = await run('llmkeys=填你的OpenAI密钥&fallback=off');
+    assert.strictEqual(off.panel.title, '翻译状态 · 用不了');
+    assert.strictEqual(off.panel['icon-color'], '#FF3B30');
+    console.log('ok  没填 key：在用 Google；兜底也关了显示用不了');
+  }
+
+  // 1b. 只用 DeepL：每个 key 剩多少字；暂停中的写到几点；最近实际用了哪个
+  {
+    const until = Math.floor(Date.now() / 1000) + 3600;
+    const fp = (key) => { let h = 5381; for (let i = 0; i < key.length; i++) h = ((h << 5) + h + key.charCodeAt(i)) >>> 0; return key.slice(-6) + '#' + h.toString(36); };
+    const store = {
+      'yt-subtitles-deepl': JSON.stringify({ paused: { [fp(D2)]: until } }),
+      'translate-usage': JSON.stringify([
+        { at: Math.floor(Date.now() / 1000) - 180, what: '字幕', engines: { deepl: { ok: 2, fail: 1, last: 456 }, google: { ok: 1, fail: 0, last: 0 } } },
+        { at: Math.floor(Date.now() / 1000) - 600, what: '评论', engines: { deepl: { ok: 1, fail: 0, last: 0 } } },
+        { at: Math.floor(Date.now() / 1000) - 900, what: '字幕', engines: { deepl: { ok: 9, fail: 0, last: 0 } } },
+      ]),
+    };
+    const { panel, calls } = await run(`keys=${D1}|${D2}&llmkeys=填你的OpenAI密钥`, {}, { deepl: { [D1]: { used: 123456, limit: 500000 }, [D2]: 456 }, store });
+    assert.strictEqual(panel.title, '翻译状态 · DeepL');
+    const lines = panel.content.split('\n');
+    assert.strictEqual(lines[0], '在用：DeepL，Google 兜底');
+    assert.strictEqual(lines[1], '最近字幕 · 3 分钟前 · DeepL 2 次，失败 1 次（额度用完） → Google 1 次');
+    assert.strictEqual(lines[2], '最近评论 · 10 分钟前 · DeepL 1 次');
+    assert.strictEqual(lines.filter((l) => l.startsWith('最近字幕')).length, 1, '每种只显示最近一次');
+    assert.strictEqual(lines[3], 'DeepL key 1（…1111 免费）：剩 376,544 字，已用 25%');
+    assert.ok(lines[4].startsWith('DeepL key 2（…2222 Pro）：额度用完，暂停到 '), lines[4]);
+    assert.strictEqual(panel['icon-color'], '#FF9500', '有 key 用不了、最近有失败：橙色');
+    assert.deepStrictEqual(calls.map((c) => c.url), ['https://api-free.deepl.com/v2/usage', 'https://api.deepl.com/v2/usage']);
+    console.log('ok  只用 DeepL：每个 key 剩多少字、暂停到几点，最近字幕和评论各用了哪个');
+  }
+
+  // 1c. DeepL 都用完了：实际会用 Google；一切正常是绿色
+  {
+    const { panel } = await run(`keys=${D1}`, {}, { deepl: { [D1]: { used: 500000, limit: 500000 } } });
+    assert.strictEqual(panel.title, '翻译状态 · Google');
+    assert.ok(panel.content.includes('实际会用 Google：前面的用不了'));
+    assert.ok(panel.content.includes('剩 0 字，已用 100%，额度用完'));
+    const ok = await run(`keys=${D1}`, {}, { deepl: { [D1]: { used: 1000, limit: 500000 } } });
+    assert.strictEqual(ok.panel.title, '翻译状态 · DeepL');
+    assert.strictEqual(ok.panel['icon-color'], '#34C759');
+    console.log('ok  DeepL 额度用完：提示实际会用 Google；正常时绿色');
   }
 
   // 2. 正常：gpt-6-luna 自动关掉思考，带上下文，译文里是银行
@@ -48,7 +102,8 @@ function run(args, llm = {}) {
     assert.ok(calls[0].payload.video && calls[0].payload.before.length && calls[0].payload.after.length, '带视频标题和前后几句');
     assert.ok(calls[0].system.includes('Simplified Chinese'));
     assert.ok(calls[0].system.includes('YouTube captions') && calls[0].system.includes('translate faithfully'), '用字幕的提示词，默认贴着原文');
-    assert.strictEqual(panel.title, '翻译测试 · 正常');
+    assert.strictEqual(panel.title, '翻译状态 · 大模型 · 大模型正常');
+    assert.ok(panel.content.startsWith('在用：大模型 gpt-6-luna，DeepL / Google 兜底'), panel.content);
     assert.ok(/^gpt-6-luna · 思考 none · \d+\.\d 秒$/m.test(panel.content), panel.content);
     assert.ok(panel.content.includes('思考 token 0'));
     assert.ok(panel.content.includes('译文：然后所有人都冲向银行'));

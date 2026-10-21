@@ -65,6 +65,8 @@ var NOTE_CHARS = 10;             // 释义最多几个字
 var EXPORT_STORE_KEY = 'yt-subtitles-export';
 var EXPORT_VIDEOS = 2;           // 记最近几个视频的字幕给导出用
 var EXPORT_HOST = /^https?:\/\/yt-subtitles\.internal\//;
+var USAGE_STORE_KEY = 'translate-usage';  // 最近几次实际用了哪个翻译，「翻译状态」面板读
+var USAGE_RECORDS = 10;
 var COMMENT_STORE_KEY = 'yt-comments-translations';
 var COMMENT_CACHE = 300;         // 缓存最近多少条评论的译文
 var COMMENT_BUDGET = 4;          // 评论最多等几秒翻译，比字幕短，翻不完的先显示原文
@@ -150,9 +152,40 @@ function now() { return Math.floor(Date.now() / 1000); }
 function request(method, options) {
   return new Promise(function (resolve) {
     $httpClient[method](options, function (error, response, body) {
-      resolve({ error: error, status: response ? (response.status || response.statusCode) : 0, body: body });
+      var status = response ? (response.status || response.statusCode) : 0;
+      noteUsage(options.url, error ? 0 : status);
+      resolve({ error: error, status: status, body: body });
     });
   });
+}
+
+// ---------- 记下这次实际用了哪个翻译（大模型 / DeepL / Google），给「翻译状态」面板看 ----------
+
+var usage = {};  // 引擎 → { ok: 成功几次, fail: 失败几次, last: 最后一次失败的状态码 }
+
+function engineOf(url) {
+  url = String(url || '');
+  if (/^https:\/\/api(-free)?\.deepl\.com\//.test(url)) return 'deepl';
+  if (/^https:\/\/translate\.googleapis\.com\//.test(url)) return 'google';
+  if (/\/chat\/completions$/.test(url)) return 'llm';
+  return '';
+}
+
+function noteUsage(url, status) {
+  var engine = engineOf(url);
+  if (!engine) return;
+  var u = usage[engine] || (usage[engine] = { ok: 0, fail: 0, last: 0 });
+  if (status === 200) u.ok++;
+  else { u.fail++; u.last = status; }
+}
+
+function saveUsage(what) {
+  if (!Object.keys(usage).length) return;
+  try {
+    var list = JSON.parse($persistentStore.read(USAGE_STORE_KEY) || '[]');
+    list.unshift({ at: now(), what: what, model: ARGS.llmKeyList.length ? ARGS.model : '', engines: usage });
+    $persistentStore.write(JSON.stringify(list.slice(0, USAGE_RECORDS)), USAGE_STORE_KEY);
+  } catch (e) {}
 }
 
 function timeout() { return Math.max(2, Math.min(10, Math.floor(remaining()))); }
@@ -1646,6 +1679,7 @@ function finish(out) {
   if (finished) return;
   finished = true;
   clearTimeout(guard);
+  saveUsage(EXPORT ? '整句文稿' : COMMENTS ? '评论' : '字幕');
   $done(out || {});
 }
 

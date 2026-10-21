@@ -1,5 +1,11 @@
 /*
- * 翻译合集的测试面板：点一下，用模块里填的大模型 key、模型、接口和「大模型思考」翻一小段字幕，
+ * 翻译合集的「翻译状态」面板，显示：
+ *   - 现在用的是哪个：大模型（填了大模型 key）、DeepL、Google（只开了兜底）
+ *   - 最近实际用了哪个：字幕、评论、整句文稿各自最近一次，各引擎请求了几次、失败的原因
+ *     （youtube-subtitles.js 每次处理完存在 translate-usage 里）
+ *   - 每个 DeepL key 还剩多少额度（GET /v2/usage，不花字数）、有没有被暂停
+ *
+ * 填了大模型 key 时还会测试一下：用模块里填的大模型 key、模型、接口和「大模型思考」翻一小段字幕，
  * 显示每个 key 能不能用、用时、思考有没有关掉、译文。用的是和各个翻译脚本同一段大模型代码和
  * YouTube 字幕的提示词（含「YouTube译法」），面板上正常，字幕那边发出去的请求也是一样的。
  *
@@ -9,6 +15,8 @@
  * 每点一次每个 key 发一个很小的请求，几百个 token。
  *
  * 参数（模块里的 argument，用 & 分隔）：
+ *   keys      DeepL key，多个用 | 分隔
+ *   fallback  google：DeepL 都用不了时用 Google；off：不用
  *   llmkeys   大模型 key，多个用 | 分隔
  *   model     模型名，默认 gpt-6-luna
  *   api       接口地址，默认 https://api.openai.com/v1
@@ -27,7 +35,7 @@ var BUDGET = 25;  // 秒，模块里脚本的 timeout 是 30
 var PAUSE = {};   // 面板只测试，不暂停 key
 
 function parseArgs(raw) {
-  var args = { llmkeys: '', model: '', api: '', effort: '', style: 'faithful', target: 'ZH-HANS' };
+  var args = { keys: '', fallback: 'google', llmkeys: '', model: '', api: '', effort: '', style: 'faithful', target: 'ZH-HANS' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -37,6 +45,9 @@ function parseArgs(raw) {
   });
   args.target = args.target.toUpperCase();
   args.style = args.style === 'natural' ? 'natural' : 'faithful';
+  // DeepL key 单独放：测试大模型时不让它退回 DeepL
+  args.deeplKeys = args.keys.split(/[|;,\s]+/).filter(function (k) { return /^[\w-]+(:fx)?$/i.test(k) && k.length > 20; });
+  args.google = args.fallback !== 'off';
   args.keyList = [];
   args.fallback = 'off';
   return parseLlmArgs(args);
@@ -411,10 +422,103 @@ async function testKey(key) {
 
 function finish(panel) { $done(panel); }
 
-async function main() {
-  if (!ARGS.llmKeyList.length) {
-    return finish({ title: '翻译测试 · 没填大模型密钥', content: '在模块参数「大模型密钥」里填 OpenAI 的 key，再点一下', icon: 'exclamationmark.triangle.fill', 'icon-color': '#FF9500' });
-  }
+var STATE_KEY = 'yt-subtitles-deepl';  // 和翻译脚本共用：哪个 DeepL key 在暂停
+var USAGE_KEY = 'translate-usage';
+var NAMES = { llm: '大模型', deepl: 'DeepL', google: 'Google' };
+
+function read(key, fallback) {
+  try { return JSON.parse($persistentStore.read(key) || '') || fallback; } catch (e) { return fallback; }
+}
+
+function number(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+function clock(seconds) {
+  var d = new Date(seconds * 1000);
+  var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+  return (d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function ago(seconds) {
+  var s = now() - seconds;
+  if (s < 60) return '刚刚';
+  if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+  if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+  return Math.floor(s / 86400) + ' 天前';
+}
+
+function failure(engine, status) {
+  if (status === 0) return '连不上';
+  if (engine === 'deepl') return { 403: 'key 无效', 456: '额度用完', 429: '请求太多' }[status] || (status >= 500 ? '服务器出错' : '状态码 ' + status);
+  if (engine === 'llm') return { 401: 'key 无效', 429: '额度用完或请求太多' }[status] || '状态码 ' + status;
+  return '状态码 ' + status;
+}
+
+// 现在按配置会先用哪个
+function primary() {
+  if (ARGS.llmKeyList.length) return '大模型 ' + ARGS.model + '，DeepL' + (ARGS.google ? ' / Google' : '') + ' 兜底';
+  if (ARGS.deeplKeys.length) return 'DeepL' + (ARGS.google ? '，Google 兜底' : '');
+  if (ARGS.google) return 'Google（没填 DeepL 和大模型的 key）';
+  return '';
+}
+
+// 最近一次：字幕、评论、整句文稿各一行
+function recentLines() {
+  var seen = {};
+  var lines = [];
+  var warn = false;
+  read(USAGE_KEY, []).forEach(function (rec) {
+    if (seen[rec.what] || lines.length >= 3) return;
+    seen[rec.what] = true;
+    var parts = ['llm', 'deepl', 'google'].filter(function (e) { return rec.engines[e]; }).map(function (e) {
+      var u = rec.engines[e];
+      var name = e === 'llm' && rec.model ? rec.model : NAMES[e];
+      if (u.fail) warn = true;
+      return name + (u.ok ? ' ' + u.ok + ' 次' : '') + (u.fail ? (u.ok ? '，' : ' ') + '失败 ' + u.fail + ' 次（' + failure(e, u.last) + '）' : '');
+    });
+    lines.push('最近' + rec.what + ' · ' + ago(rec.at) + ' · ' + parts.join(' → '));
+  });
+  return { lines: lines.length ? lines : ['最近：还没有翻译记录'], warn: warn };
+}
+
+function deeplUsage(key) {
+  var host = /:fx$/i.test(key) ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+  return request('get', { url: host + '/v2/usage', headers: { Authorization: 'DeepL-Auth-Key ' + key }, timeout: 8 }).then(function (r) {
+    if (r.error || r.status !== 200) return { ok: false, status: r.error ? 0 : r.status };
+    try {
+      var j = JSON.parse(r.body);
+      return { ok: true, used: j.character_count || 0, limit: j.character_limit || 0 };
+    } catch (e) {
+      return { ok: false, status: 0 };
+    }
+  });
+}
+
+// 每个 DeepL key：剩多少字、用了百分之几，暂停中的写到几点
+async function deeplLines() {
+  var paused = read(STATE_KEY, {}).paused || {};
+  var results = await Promise.all(ARGS.deeplKeys.map(deeplUsage));
+  var level = 'good';
+  var lines = results.map(function (r, i) {
+    var key = ARGS.deeplKeys[i];
+    var name = 'DeepL' + (ARGS.deeplKeys.length > 1 ? ' key ' + (i + 1) : '') + '（…' + key.replace(/:fx$/i, '').slice(-4) + (/:fx$/i.test(key) ? ' 免费' : ' Pro') + '）';
+    var until = paused[fingerprint(key)];
+    var pause = until > now() ? '，暂停到 ' + clock(until) : '';
+    if (!r.ok) { level = 'bad'; return name + '：' + failure('deepl', r.status) + pause; }
+    var left = Math.max(0, r.limit - r.used);
+    var pct = r.limit ? Math.round(r.used * 100 / r.limit) : 0;
+    if (!left || pause) level = level === 'bad' ? 'bad' : 'warn';
+    else if (pct >= 90 && level === 'good') level = 'warn';
+    return name + '：剩 ' + number(left) + ' 字，已用 ' + pct + '%' + (left ? '' : '，额度用完') + pause;
+  });
+  var usable = results.filter(function (r, i) {
+    var until = paused[fingerprint(ARGS.deeplKeys[i])];
+    return r.ok && r.limit > r.used && !(until > now());
+  }).length;
+  return { lines: lines, level: level, usable: usable };
+}
+
+// 填了大模型 key 才测：返回几行和结论
+async function llmLines() {
   var results = [];
   for (var i = 0; i < ARGS.llmKeyList.length && remaining() > 3; i++) results.push(await testKey(ARGS.llmKeyList[i]));
   var good = results.filter(function (r) { return r.ok; });
@@ -425,7 +529,7 @@ async function main() {
   if (!first) {
     lines.unshift(ARGS.model + ' · 思考 ' + results[0].last.effort);
     log(results.map(function (r) { return r.last.status + ' ' + r.last.body; }).join('\n'));
-    return finish({ title: '翻译测试 · 用不了', content: lines.join('\n'), icon: 'xmark.octagon.fill', 'icon-color': '#FF3B30' });
+    return { lines: lines, verdict: '大模型用不了', level: 'bad' };
   }
   var last = first.last;
   lines.unshift(ARGS.model + ' · 思考 ' + last.effort + ' · ' + (last.ms / 1000).toFixed(1) + ' 秒');
@@ -436,14 +540,38 @@ async function main() {
   var contextOk = !zh || /银行|銀行/.test(first.text);
   if (!contextOk) lines.push('没结合上下文：bank 应该是银行');
   var perfect = !last.reasoning && good.length === results.length && contextOk;
-  finish({
-    title: '翻译测试 · ' + (perfect ? '正常' : '能用，有问题'),
-    content: lines.join('\n'),
-    icon: perfect ? 'checkmark.seal.fill' : 'exclamationmark.triangle.fill',
-    'icon-color': perfect ? '#34C759' : '#FF9500',
-  });
+  return { lines: lines, verdict: perfect ? '大模型正常' : '大模型能用，有问题', level: perfect ? 'good' : 'warn' };
+}
+
+var STYLES = {
+  good: { icon: 'checkmark.seal.fill', 'icon-color': '#34C759' },
+  warn: { icon: 'exclamationmark.triangle.fill', 'icon-color': '#FF9500' },
+  bad: { icon: 'xmark.octagon.fill', 'icon-color': '#FF3B30' },
+};
+
+async function main() {
+  var using = primary();
+  var recent = recentLines();
+  var deepl = ARGS.deeplKeys.length ? await deeplLines() : null;
+  var llm = ARGS.llmKeyList.length ? await llmLines() : null;
+  var lines = ['在用：' + (using || '没有可用的翻译：填 DeepL 或大模型的 key，或者把「备用翻译」改成 google')];
+  lines = lines.concat(recent.lines);
+  if (deepl) lines = lines.concat(deepl.lines);
+  if (llm) lines = lines.concat(llm.lines);
+
+  // 实际会用到的：大模型能用就是大模型；否则有能用的 DeepL key 就是 DeepL；否则 Google
+  var effective = llm && llm.level !== 'bad' ? '大模型'
+    : deepl && deepl.usable ? 'DeepL'
+    : ARGS.google ? 'Google'
+    : '';
+  var level = !effective ? 'bad'
+    : (llm && llm.level !== 'good') || (deepl && deepl.level !== 'good') || recent.warn ? 'warn'
+    : 'good';
+  if (effective && effective !== (using.split(/[ ，（]/)[0])) lines.splice(1, 0, '实际会用 ' + effective + '：前面的用不了');
+  var title = '翻译状态 · ' + (effective || '用不了') + (llm ? ' · ' + llm.verdict : '');
+  finish(Object.assign({ title: title, content: lines.join('\n') }, STYLES[level]));
 }
 
 main().catch(function (error) {
-  finish({ title: '翻译测试 · 出错了', content: String(error && error.message || error), icon: 'xmark.octagon.fill', 'icon-color': '#FF3B30' });
+  finish({ title: '翻译状态 · 出错了', content: String(error && error.message || error), icon: 'xmark.octagon.fill', 'icon-color': '#FF3B30' });
 });
