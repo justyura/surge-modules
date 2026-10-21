@@ -1517,13 +1517,34 @@ function originalText(entry) {
   return buildParagraphs(entry.cues).join('\n\n') + '\n';
 }
 
-// 在 Claude App 里开一个新对话、把原文填进输入框（claude://claude.ai/new?q=，非官方但能用）。
-// 太长放不进链接就只填一句提示，原文靠剪贴板
+// 发给 Claude 的提示词，字幕原文放在 [paste here]
+var CLAUDE_PROMPT = [
+  'Below is a full transcript of a video. Give me a detailed summary in Chinese that captures the key points — not a short overview.',
+  '',
+  'Structure it like this:',
+  '1. One-paragraph gist: what the video is about and its central argument or takeaway.',
+  '2. Key points, in the order they appear: for each, a short heading plus 2–4 sentences explaining the idea, the reasoning or evidence given, and any concrete examples, numbers, or names mentioned.',
+  '3. Notable claims or recommendations the speaker makes explicitly.',
+  '4. Terms or concepts worth knowing, each with a one-line explanation.',
+  "5. Anything the speaker says is important but doesn't fully explain, or open questions left unresolved.",
+  '',
+  "Rules: write everything in Chinese, but keep technical terms and proper nouns in their original English alongside the Chinese. Stay faithful to what's actually said — don't add outside knowledge or interpretation. Skip filler, sponsor reads, and repetition. Length can be long; completeness matters more than brevity.",
+  '',
+  'Transcript:',
+  '[paste here]',
+].join('\n');
+
+function claudePrompt(title, text) {
+  var body = (title ? 'Video title: ' + title + '\n\n' : '') + text.trim();
+  return CLAUDE_PROMPT.replace('[paste here]', function () { return body; });
+}
+
+// 在 Claude App 里开一个新对话、把提示词和原文填进输入框（claude://claude.ai/new?q=，非官方但能用）。
+// 太长放不进链接：提示词照样填，原文的位置换成一句提示，原文靠剪贴板
 function claudeUrl(title, text) {
-  var head = (title ? 'YouTube 视频「' + title + '」的字幕原文：' : 'YouTube 视频的字幕原文：') + '\n\n';
-  var full = encodeURIComponent(head + text);
+  var full = encodeURIComponent(claudePrompt(title, text));
   if (full.length <= CLAUDE_URL_CHARS) return 'claude://claude.ai/new?q=' + full;
-  return 'claude://claude.ai/new?q=' + encodeURIComponent(head + '（原文太长放不进链接，已经复制到剪贴板，长按这里粘贴）\n\n');
+  return 'claude://claude.ai/new?q=' + encodeURIComponent(claudePrompt(title, '（原文太长放不进链接，已经复制到剪贴板：删掉这一行，长按粘贴）'));
 }
 
 async function exportMain() {

@@ -839,7 +839,11 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     assert.strictEqual(original.body.replace(/\n\n/g, ' ').trim(), lines.join(' '), '原文就是全部字幕，合成段落');
     const link = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=claudeurl', store);
     assert.ok(link.body.startsWith('claude://claude.ai/new?q='));
-    assert.strictEqual(decodeURIComponent(link.body.slice('claude://claude.ai/new?q='.length)), 'YouTube 视频「Fixing a squeaky door — Handy Dan」的字幕原文：\n\n' + original.body);
+    const prompt = decodeURIComponent(link.body.slice('claude://claude.ai/new?q='.length));
+    assert.ok(prompt.startsWith('Below is a full transcript of a video. Give me a detailed summary in Chinese'), prompt.slice(0, 80));
+    assert.ok(prompt.includes('5. Anything the speaker says is important') && prompt.includes('completeness matters more than brevity.'));
+    assert.ok(prompt.endsWith('Transcript:\nVideo title: Fixing a squeaky door — Handy Dan\n\n' + original.body.trim()), '原文放在 Transcript: 后面，前面一行视频标题');
+    assert.ok(!prompt.includes('[paste here]'));
     const page = await runExport('https://yt-subtitles.internal/?v=vid1', store);
     assert.ok(page.body.includes('在 Claude 中打开原文') && page.body.includes('复制原文') && page.body.includes(JSON.stringify(link.body)));
     for (const r of [original, link, page]) assert.ok(!r.calls.some((c) => c.vendor === 'deepl' || c.vendor === 'google'), '不用翻译');
@@ -849,7 +853,8 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     const many = Array.from({ length: 4000 }, (_, i) => `a fairly long line of speech number ${i}`);
     await run({ url: URL_EN.replace('vid1', 'long1'), body: json3(many), args: ARGS('', '&fallback=off'), store: longStore });
     const longLink = await runExport('https://yt-subtitles.internal/?v=long1&fmt=claudeurl', longStore);
-    assert.ok(longLink.body.length < 1000 && decodeURIComponent(longLink.body).includes('已经复制到剪贴板'));
+    const longPrompt = decodeURIComponent(longLink.body.slice('claude://claude.ai/new?q='.length));
+    assert.ok(longLink.body.length < 3000 && longPrompt.startsWith('Below is a full transcript') && longPrompt.endsWith('已经复制到剪贴板：删掉这一行，长按粘贴）'), '太长：提示词照样填，原文靠剪贴板');
     console.log('ok  复制原文、在 Claude 中打开（带标题，太长改用剪贴板），给快捷指令的地址直接返回文字');
   }
 
