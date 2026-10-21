@@ -41,12 +41,20 @@
  *
  * 还管字幕导出：处理字幕时把每句的时间、原文、译文记下来（最近 2 个视频）。在 Safari 里打开
  * https://yt-subtitles.internal/（可以带 ?v=视频ID），这个地址由本脚本作为 http-request 脚本直接回应：
- * 一个下载页面，和双语 / 原文 / 译文的 SRT、纯文本。不会发到网上。
+ * 一个下载页面，和双语 / 原文 / 译文的 SRT、纯文本，以及整句文稿（碎片字幕合成段落，一段英文一段中文，
+ * 用 DeepL 带上下文整段翻，翻好的存下来）。不会发到网上。
  */
 
 var STORE_KEY = 'yt-subtitles-deepl';
-var CUES_PER_TEXT = 40;          // 多少句字幕打包成一段发给 DeepL（用 <t> 标签隔开）
-var CHARS_PER_TEXT = 3000;
+var CUES_PER_TEXT = 60;          // 多少句字幕打包成一段发给 DeepL（用 <t> 标签隔开），一段一个请求
+var CHARS_PER_TEXT = 4500;
+var DEEPL_PARALLEL = 6;          // DeepL 同时发几个请求：每段单独一个请求、各带各的上下文
+var CONTEXT_BEFORE = 600;        // 给 DeepL 的上下文：前面多少字
+var CONTEXT_AFTER = 200;         // 后面多少字
+var DOC_CHARS = 420;             // 整句文稿一段大约多少字
+var DOC_MAX_CHARS = 650;
+var DOC_PACK_CHARS = 4000;       // 文稿几段打包成一次 DeepL 请求
+var DOC_BUDGET = 25;             // 文稿最多翻几秒，没翻完的刷新接着翻
 var TEXTS_PER_REQUEST = 50;      // DeepL 一次最多 50 段
 var BYTES_PER_REQUEST = 100000;  // DeepL 单次请求上限 128 KiB，留点余量
 var PARALLEL = 3;                // 同时发几个请求
@@ -150,10 +158,12 @@ function timeout() { return Math.max(2, Math.min(10, Math.floor(remaining()))); 
 
 // ---------- DeepL ----------
 
-function deeplOnce(key, texts, source, xml) {
+// context：DeepL 的上下文参数，只作参考、不翻译、不计费，对这个请求里所有段落都生效
+function deeplOnce(key, texts, source, xml, context) {
   var host = /:fx$/i.test(key) ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
   var body = { text: texts, target_lang: ARGS.target, preserve_formatting: true };
   if (xml) body.tag_handling = 'xml';
+  if (context) body.context = context;
   if (source) body.source_lang = source;
   return request('post', {
     url: host + '/v2/translate',
@@ -171,8 +181,17 @@ function deeplOnce(key, texts, source, xml) {
   });
 }
 
-function deepl(texts, source, state, xml) {
-  return withKeys(ARGS.keyList, 'current', state, function (key) { return deeplOnce(key, texts, source, xml); }, 1);
+function deepl(texts, source, state, xml, context) {
+  return withKeys(ARGS.keyList, 'current', state, function (key) { return deeplOnce(key, texts, source, xml, context); }, 1);
+}
+
+// 上下文：视频标题，加上这一段前后的字幕（或段落）
+function deeplContext(about, before, after) {
+  var parts = [];
+  if (about) parts.push('Video: ' + about);
+  if (before) parts.push('Before: ' + before.slice(-CONTEXT_BEFORE));
+  if (after) parts.push('After: ' + after.slice(0, CONTEXT_AFTER));
+  return parts.join('\n');
 }
 
 // 几十句字幕打包成一段：<t>句1</t><t>句2</t>…，DeepL 按 XML 处理会保留标签，
@@ -726,19 +745,30 @@ function summaryFor(summary, texts) {
 // ---------- 翻译调度 ----------
 
 // 翻译一组不重复的文本，返回 { 原文: 译文 }。到截止时间就把已经翻好的返回
-async function translateAll(texts, source, state, cached) {
+// videoId 用来查视频标题，给 DeepL 当上下文
+async function translateAll(texts, source, state, cached, videoId) {
   var result = {};
   Object.keys(cached).forEach(function (k) { result[k] = cached[k]; });
   var todo = texts.filter(function (t) { return !(t in result); });
-  var requests = group(pack(todo));
-  log('共 ' + texts.length + ' 句，缓存命中 ' + (texts.length - todo.length) + ' 句，打包成 ' + requests.length + ' 个请求，限时 ' + ARGS.budget + ' 秒');
+  // 一段一个请求：DeepL 的上下文对整个请求生效，每段要带自己前后的字幕
+  var about = todo.length && ARGS.keyList.length ? await videoInfo(videoId) : '';
+  var position = {};
+  texts.forEach(function (t, i) { if (!(t in position)) position[t] = i; });
+  var requests = pack(todo).map(function (unit) {
+    var first = position[unit.cues[0]];
+    var last = position[unit.cues[unit.cues.length - 1]];
+    var before = texts.slice(Math.max(0, first - 30), first).join(' ');
+    var after = texts.slice(last + 1, last + 8).join(' ');
+    return { units: [unit], context: deeplContext(about, before, after) };
+  });
+  log('共 ' + texts.length + ' 句，缓存命中 ' + (texts.length - todo.length) + ' 句，分成 ' + requests.length + ' 个请求（带上下文' + (about ? '和视频标题' : '') + '），限时 ' + ARGS.budget + ' 秒');
 
   var loose = [];     // 标签对不上的句子，单独再翻
   var leftover = [];  // DeepL 不可用时留给 Google 的句子
   var deeplDown = !ARGS.keyList.length;
 
-  await parallel(requests, PARALLEL, async function (req) {
-    var list = deeplDown ? null : await deepl(req.units.map(function (u) { return u.text; }), source, state, true);
+  await parallel(requests, DEEPL_PARALLEL, async function (req) {
+    var list = deeplDown ? null : await deepl(req.units.map(function (u) { return u.text; }), source, state, true, req.context);
     if (!list) {
       if (remaining() > 1) deeplDown = true;
       req.units.forEach(function (u) { leftover.push.apply(leftover, u.cues); });
@@ -1130,7 +1160,7 @@ function saveCommentCache(entries) {
 }
 
 // 评论一条一段发给 DeepL，不打包：每条评论语言可能不一样，DeepL 按段识别语言
-async function translateComments(texts, state) {
+async function translateComments(texts, state, context) {
   var result = {};
   var batches = [];
   var batch = null;
@@ -1146,7 +1176,7 @@ async function translateComments(texts, state) {
   var leftover = [];
   var deeplDown = !ARGS.keyList.length;
   await parallel(batches, PARALLEL, async function (b) {
-    var list = deeplDown ? null : await deepl(b.texts, '', state, false);
+    var list = deeplDown ? null : await deepl(b.texts, '', state, false, context);
     if (!list) {
       if (remaining() > 1) deeplDown = true;
       leftover.push.apply(leftover, b.texts);
@@ -1198,7 +1228,7 @@ async function commentsMain() {
 
   // 视频标题给大模型当上下文，和拿评论同时进行
   var videoId = commentsVideoId($request.body);
-  var video = ARGS.llmKeyList.length ? videoInfo(videoId) : Promise.resolve('');
+  var video = ARGS.llmKeyList.length || ARGS.keyList.length ? videoInfo(videoId) : Promise.resolve('');
   var upstream = await fetchUpstream();
   if (!upstream) return null;  // 没拿到就让 App 自己的请求照常发出去
   var response = { status: upstream.status, headers: upstream.headers, body: upstream.body };
@@ -1244,9 +1274,13 @@ async function translateCommentTexts(body, video, videoId) {
   var budget = Math.min(ARGS.budget, ARGS.llmKeyList.length ? LLM_COMMENT_BUDGET : COMMENT_BUDGET);
   DEADLINE = Date.now() + budget * 1000;
   arm(budget + 2);
+  var context = await commentContext(video, videoId);
+  // DeepL 的上下文：评论是哪个视频下面的、视频讲什么
+  var deeplAbout = context.video ? 'YouTube comments under the video: ' + context.video + (context.topic ? '\nThe video is about: ' + context.topic : '') : '';
   var map = await translateCached(todo, {
-    system: commentPrompt(), context: await commentContext(video, videoId), field: 'comments', chars: LLM_COMMENT_CHARS,
-    load: loadCommentCache, save: saveCommentCache, key: function (t) { return ARGS.style + '#' + commentCacheKey(t); }, translate: translateComments,
+    system: commentPrompt(), context: context, field: 'comments', chars: LLM_COMMENT_CHARS,
+    load: loadCommentCache, save: saveCommentCache, key: function (t) { return ARGS.style + '#' + commentCacheKey(t); },
+    translate: function (texts, state) { return translateComments(texts, state, deeplAbout); },
   });
   log('翻好 ' + Object.keys(map).length + ' / ' + todo.length + ' 条');
 
@@ -1279,6 +1313,9 @@ function rememberCues(url, handler, doc, texts, map) {
   if (!cues.length) return;
   var list = loadExports().filter(function (e) { return e.v !== v; });
   var entry = { v: v, lang: param(url, 'lang') || param(url, 'tlang'), target: ARGS.target, cues: cues };
+  // 翻好的整句文稿留着：同一份字幕重新处理一遍不用再翻
+  var old = loadExports().filter(function (e) { return e.v === v; })[0];
+  if (old && old.doc && old.cues.length === cues.length) entry.doc = old.doc;
   list.unshift(entry);
   var ok = false;
   try { ok = $persistentStore.write(JSON.stringify(list.slice(0, EXPORT_VIDEOS)), EXPORT_STORE_KEY); } catch (e) {}
@@ -1325,11 +1362,123 @@ function page(title, inner) {
     + 'body{margin:0;padding:20px 16px;background:var(--bg);color:var(--fg);font:16px/1.5 -apple-system,system-ui,sans-serif}'
     + 'h1{font-size:20px;margin:0 0 4px}p{color:var(--muted);margin:0 0 16px}'
     + 'a.b,button{display:block;width:100%;box-sizing:border-box;margin:0 0 10px;padding:12px;border:0;border-radius:10px;background:var(--card);color:var(--fg);font:inherit;text-align:center;text-decoration:none}'
+    + '.doc{margin-top:16px}.doc p{color:var(--fg);margin:0 0 6px}.doc p.zh{margin:0 0 22px;color:var(--muted)}'
     + 'a.b.main{background:var(--accent);color:#fff}pre{white-space:pre-wrap;background:var(--card);padding:12px;border-radius:10px;font-size:14px}'
     + '</style></head><body>' + inner + '</body></html>';
 }
 
-function exportMain() {
+// ---------- 整句文稿 ----------
+
+// 自动字幕没有标点：攒到 DOC_CHARS 左右，在之后停顿最长的地方断开；人工字幕有标点：按句子合段
+function buildParagraphs(cues) {
+  var items = cues.map(function (c) { return { text: c[2].replace(/\s*\n\s*/g, ' ').trim(), start: c[0] }; })
+    .filter(function (it) { return it.text; });
+  var all = items.map(function (it) { return it.text; }).join(' ');
+  var stops = (all.match(/[.!?。！？](?=\s|$)/g) || []).length;
+  var paras = [];
+  if (stops >= items.length * 0.3) {
+    var sentences = all.match(/[^.!?。！？]+(?:[.!?。！？]+["'”’)\]]*|$)/g) || [all];
+    var para = '';
+    sentences.forEach(function (sentence) {
+      para += (para ? ' ' : '') + sentence.trim();
+      if (para.length >= DOC_CHARS) { paras.push(para); para = ''; }
+    });
+    if (para) paras.push(para);
+  } else {
+    var i = 0;
+    while (i < items.length) {
+      var length = 0;
+      var j = i;
+      while (j < items.length && length < DOC_CHARS * 0.7) { length += items[j].text.length + 1; j++; }
+      var best = j;
+      var bestGap = -1;
+      for (var k = j; k < items.length && length < DOC_MAX_CHARS; k++) {
+        var gap = items[k].start - items[k - 1].start;
+        if (gap > bestGap) { bestGap = gap; best = k; }
+        length += items[k].text.length + 1;
+        if (k === items.length - 1 && length < DOC_MAX_CHARS) best = items.length;
+      }
+      paras.push(items.slice(i, best).map(function (it) { return it.text; }).join(' '));
+      i = best;
+    }
+  }
+  return paras.map(function (p) { return p.replace(/\s+/g, ' ').trim(); }).filter(Boolean);
+}
+
+// 几段打包成一次请求（<p> 隔开），段落之间互为上下文，再带上包前后各一段。返回 { 段号: 译文 }
+async function translateParagraphs(paras, todo, state, about) {
+  var result = {};
+  var packs = [];
+  var current = null;
+  todo.forEach(function (i) {
+    var piece = '<p>' + escapeTag(paras[i]) + '</p>';
+    if (!current || current.text.length + piece.length > DOC_PACK_CHARS || i !== current.index[current.index.length - 1] + 1) {
+      current = { index: [], text: '' };
+      packs.push(current);
+    }
+    current.index.push(i);
+    current.text += piece;
+  });
+  var leftover = [];
+  var deeplDown = !!deeplProblemText(state);
+  await parallel(packs, DEEPL_PARALLEL, async function (pk) {
+    var first = pk.index[0];
+    var last = pk.index[pk.index.length - 1];
+    var context = deeplContext(about, first > 0 ? paras[first - 1] : '', last + 1 < paras.length ? paras[last + 1] : '');
+    var list = deeplDown ? null : await deepl([pk.text], '', state, true, context);
+    var parts = [];
+    if (list) String(list[0]).replace(/<p>([\s\S]*?)<\/p>/g, function (m, inner) { parts.push(unescapeTag(inner).trim()); return m; });
+    if (list && parts.length === pk.index.length) {
+      pk.index.forEach(function (i, j) { if (parts[j]) result[i] = parts[j]; });
+      return;
+    }
+    if (!list && remaining() > 1) deeplDown = true;
+    // 标签对不上：这一包逐段再翻一次
+    var again = list ? await deepl(pk.index.map(function (i) { return paras[i]; }), '', state, false, context) : null;
+    if (again) pk.index.forEach(function (i, j) { if (again[j]) result[i] = again[j].trim(); });
+    else leftover.push.apply(leftover, pk.index);
+  });
+  if (leftover.length && ARGS.fallback === 'google' && remaining() > 1) {
+    var byText = {};
+    await google(leftover.map(function (i) { return paras[i]; }), byText);
+    leftover.forEach(function (i) { if (byText[paras[i]]) result[i] = byText[paras[i]]; });
+  }
+  return result;
+}
+
+function deeplProblemText(state) {
+  if (!ARGS.keyList.length) return 'no key';
+  var usable = ARGS.keyList.some(function (k) { return !(state.paused[fingerprint(k)] > now()); });
+  return usable ? '' : 'paused';
+}
+
+// 拿到这个视频的整句文稿：分好的段落和译文，翻过的存在导出记录里
+async function transcript(entry) {
+  var doc = entry.doc && entry.doc.target === ARGS.target ? entry.doc : { target: ARGS.target, paras: buildParagraphs(entry.cues), zh: [] };
+  var todo = [];
+  doc.paras.forEach(function (p, i) { if (!doc.zh[i] && needsTranslation(p)) todo.push(i); });
+  if (todo.length && (ARGS.keyList.length || ARGS.fallback === 'google')) {
+    DEADLINE = Date.now() + DOC_BUDGET * 1000;
+    arm(DOC_BUDGET + 3);
+    var state = loadState();
+    var about = entry.v === 'latest' ? '' : await videoInfo(entry.v);
+    var fresh = await translateParagraphs(doc.paras, todo, state, about);
+    saveState(state);
+    Object.keys(fresh).forEach(function (i) { doc.zh[i] = fresh[i]; });
+    log('整句文稿 ' + doc.paras.length + ' 段，这次翻了 ' + Object.keys(fresh).length + ' 段');
+    var list = loadExports();
+    list.forEach(function (e) { if (e.v === entry.v) e.doc = doc; });
+    try { $persistentStore.write(JSON.stringify(list), EXPORT_STORE_KEY); } catch (e) {}
+  }
+  var left = doc.paras.filter(function (p, i) { return !doc.zh[i] && needsTranslation(p); }).length;
+  return { paras: doc.paras, zh: doc.zh, left: left };
+}
+
+function docText(doc) {
+  return doc.paras.map(function (p, i) { return doc.zh[i] ? p + '\n' + doc.zh[i] : p; }).join('\n\n') + '\n';
+}
+
+async function exportMain() {
   var url = $request.url;
   var v = param(url, 'v');
   var exports = loadExports();
@@ -1350,6 +1499,28 @@ function exportMain() {
       'Cache-Control': 'no-store',
     }, body: toSrt(entry.cues, mode) } };
   }
+  if (fmt === 'doc' || fmt === 'doctxt') {
+    var doc = await transcript(entry);
+    if (fmt === 'doctxt') {
+      return { response: { status: 200, headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="' + entry.v + '.transcript.txt"',
+        'Cache-Control': 'no-store',
+      }, body: docText(doc) } };
+    }
+    var body = doc.paras.map(function (p, i) {
+      return '<div class="para"><p class="en">' + escapeHtml(p) + '</p>' + (doc.zh[i] ? '<p class="zh">' + escapeHtml(doc.zh[i]) + '</p>' : '') + '</div>';
+    }).join('');
+    var allText = JSON.stringify(docText(doc)).replace(/</g, '\\u003c');
+    return { response: { status: 200, headers: html, body: page('整句文稿', '<h1>整句文稿</h1>'
+      + '<p>视频 ' + escapeHtml(entry.v) + ' · ' + doc.paras.length + ' 段'
+      + (doc.left ? '，还有 ' + doc.left + ' 段没翻完，刷新接着翻' : '') + '</p>'
+      + '<a class="b main" href="/?v=' + encodeURIComponent(entry.v) + '&fmt=doctxt">下载文稿 TXT</a>'
+      + '<button id="copy">复制全部文字</button>'
+      + '<div class="doc">' + body + '</div>'
+      + '<script>var all=' + allText + ';document.getElementById("copy").onclick=function(){var b=this;'
+      + 'navigator.clipboard.writeText(all).then(function(){b.textContent="已复制"},function(){b.textContent="复制失败，用「下载文稿 TXT」"})}</script>') } };
+  }
   if (fmt === 'txt') {
     return { response: { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }, body: toText(entry.cues, mode) } };
   }
@@ -1357,10 +1528,10 @@ function exportMain() {
   var link = function (m, f, label, cls) {
     return '<a class="b' + (cls ? ' ' + cls : '') + '" href="/?v=' + encodeURIComponent(entry.v) + '&mode=' + m + '&fmt=' + f + '">' + label + '</a>';
   };
-  var buttons = translated
-    ? link('both', 'srt', '下载双语 SRT', 'main') + link('original', 'srt', '下载原文 SRT') + link('translation', 'srt', '下载译文 SRT')
+  var buttons = link('both', 'doc', '整句文稿（一段英文一段中文）', 'main') + (translated
+    ? link('both', 'srt', '下载双语 SRT') + link('original', 'srt', '下载原文 SRT') + link('translation', 'srt', '下载译文 SRT')
       + link('both', 'txt', '查看双语纯文本') + link('original', 'txt', '查看原文纯文本')
-    : link('original', 'srt', '下载 SRT', 'main') + link('original', 'txt', '查看纯文本');
+    : link('original', 'srt', '下载 SRT') + link('original', 'txt', '查看纯文本'));
   var preview = entry.cues.slice(0, 6).map(function (c) { return escapeHtml(cueText(c, 'both')); }).join('\n\n');
   var all = JSON.stringify(toText(entry.cues, translated ? 'both' : 'original')).replace(/</g, '\\u003c');
   return { response: { status: 200, headers: html, body: page('导出字幕', '<h1>导出字幕</h1>'
@@ -1417,7 +1588,7 @@ function main() {
 
   var translating = !canTranslate ? Promise.resolve({ map: cached, save: { map: cached } })
     : useLlm ? subtitlesWithLlm(unique, source, state, entry, param(url, 'v'))
-    : translateAll(unique, source, state, cached).then(function (map) { return { map: map, save: { map: map } }; });
+    : translateAll(unique, source, state, cached, param(url, 'v')).then(function (map) { return { map: map, save: { map: map } }; });
 
   return Promise.all([translating, words]).then(function (results) {
     var map = results[0].map;

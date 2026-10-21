@@ -51,7 +51,7 @@ function run({ url, body, args, behavior = {}, store = {}, google = true, latenc
           const b = JSON.parse(req.body);
           const xml = b.tag_handling === 'xml';
           const cues = xml ? b.text.join('').split('<t>').length - 1 : b.text.length;
-          calls.push({ vendor: 'deepl', host: new URL(req.url).host, key, n: b.text.length, cues, xml, target: b.target_lang, source: b.source_lang });
+          calls.push({ vendor: 'deepl', host: new URL(req.url).host, key, n: b.text.length, cues, xml, target: b.target_lang, source: b.source_lang, context: b.context });
           const how = behavior[key] ?? 200;
           if (how === 'hang') return;
           const reply = () => {
@@ -168,7 +168,7 @@ function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dz
           if (fakeLlm(req, cb, calls, llm)) return;
           const key = req.headers.Authorization.replace('DeepL-Auth-Key ', '');
           const b = JSON.parse(req.body);
-          calls.push({ vendor: 'deepl', key, n: b.text.length, xml: b.tag_handling === 'xml', source: b.source_lang });
+          calls.push({ vendor: 'deepl', key, n: b.text.length, xml: b.tag_handling === 'xml', source: b.source_lang, context: b.context });
           const how = behavior[key] ?? 200;
           if (how === 'hang') return;
           if (how !== 200) return setTimeout(() => cb(null, { status: how }, '{}'));
@@ -189,14 +189,30 @@ function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dz
 }
 
 // 导出页面：http-request 脚本，没有 $response
-function runExport(url, store) {
+function runExport(url, store, { behavior = 200, google = true } = {}) {
+  const calls = [];
   return new Promise((resolve) => {
     const env = {
       $argument: ARGS(K1),
       $request: { url, headers: {} },
       $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
-      $httpClient: { post: () => { throw new Error('导出不该发请求'); }, get: () => { throw new Error('导出不该发请求'); } },
-      $done: (out) => resolve(out.response),
+      $httpClient: {
+        post(req, cb) {
+          const b = JSON.parse(req.body);
+          calls.push({ vendor: 'deepl', n: b.text.length, xml: b.tag_handling === 'xml', context: b.context, text: b.text });
+          if (behavior !== 200) return setTimeout(() => cb(null, { status: behavior }, '{}'));
+          const tr = (t) => (b.tag_handling === 'xml' ? t.replace(/<(p|t)>([\s\S]*?)<\/\1>/g, '<$1>译:$2</$1>') : '译:' + t);
+          setTimeout(() => cb(null, { status: 200 }, JSON.stringify({ translations: b.text.map((t) => ({ text: tr(t) })) })));
+        },
+        get(req, cb) {
+          if (req.url.includes('/oembed?')) return fakeOembed(req, cb, calls);
+          const q = decodeURIComponent(/[?&]q=([^&]*)/.exec(req.url)[1]);
+          calls.push({ vendor: 'google', q });
+          if (!google) return setTimeout(() => cb('down', null, null));
+          setTimeout(() => cb(null, { status: 200 }, JSON.stringify([[[q.split('\n').map((l) => '谷:' + l).join('\n'), q]]])));
+        },
+      },
+      $done: (out) => { const r = out.response; r.calls = calls; resolve(r); },
       console: { log: () => {} },
     };
     new Function(...Object.keys(env), CODE)(...Object.values(env));
@@ -219,10 +235,10 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
   {
     const r = await run({ url: URL_EN, body: json3(['Hello', 'World & <you>']), args: ARGS(`${K1}|${K2}`), behavior: { [K1]: 456 } });
     assert.deepStrictEqual(events(r.out), ['Hello\n译:Hello', 'World & <you>\n译:World & <you>']);
-    assert.deepStrictEqual(r.calls.map((c) => c.key), [K1, K2]);
-    assert.strictEqual(r.calls[0].host, 'api-free.deepl.com');
-    assert.strictEqual(r.calls[0].target, 'ZH-HANS');
-    assert.strictEqual(r.calls[0].source, 'EN');
+    assert.deepStrictEqual(deeplCalls(r).map((c) => c.key), [K1, K2]);
+    assert.strictEqual(deeplCalls(r)[0].host, 'api-free.deepl.com');
+    assert.strictEqual(deeplCalls(r)[0].target, 'ZH-HANS');
+    assert.strictEqual(deeplCalls(r)[0].source, 'EN');
     const s = state(r.store);
     assert.strictEqual(s.current, K2.slice(-6) + '#1qfyqcx', '记住的是第二个 key 的指纹');
     const pausedFor = Object.values(s.paused)[0] - Math.floor(Date.now() / 1000);
@@ -230,7 +246,7 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     assert.ok(!JSON.stringify(s).includes(K1) && !JSON.stringify(s).includes(K2), '状态里不存明文 key');
 
     const r2 = await run({ url: URL_EN.replace('vid1', 'vid2'), body: json3(['Next']), args: ARGS(`${K1}|${K2}`), behavior: { [K1]: 456 }, store: r.store });
-    assert.deepStrictEqual(r2.calls.map((c) => c.key), [K2]);
+    assert.deepStrictEqual(deeplCalls(r2).map((c) => c.key), [K2]);
 
     const r3 = await run({ url: URL_EN, body: json3(['Hello', 'World & <you>']), args: ARGS(`${K1}|${K2}`), store: r.store });
     assert.strictEqual(r3.calls.length, 0);
@@ -240,8 +256,8 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
   // 2. 网络错误不暂停 key；key 无效（403）暂停 7 天；Pro key 走 api.deepl.com
   {
     const r = await run({ url: URL_EN, body: json3(['A']), args: ARGS(`${K1}|${K2}|${K3}`), behavior: { [K1]: 'network', [K2]: 403 } });
-    assert.deepStrictEqual(r.calls.map((c) => c.key), [K1, K2, K3]);
-    assert.strictEqual(r.calls[2].host, 'api.deepl.com');
+    assert.deepStrictEqual(deeplCalls(r).map((c) => c.key), [K1, K2, K3]);
+    assert.strictEqual(deeplCalls(r)[2].host, 'api.deepl.com');
     const paused = Object.values(state(r.store).paused).map((t) => t - Math.floor(Date.now() / 1000));
     assert.strictEqual(paused.length, 1, '网络错误不暂停');
     assert.ok(paused[0] > 7 * 86400 - 100, '403 暂停 7 天');
@@ -261,16 +277,20 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  全部 key 失败用 Google 兜底，再失败或关掉兜底就原样返回');
   }
 
-  // 4. 长视频：3000 句打包成很少的请求；重复句子只翻一次
+  // 4. 长视频：60 句一段、一段一个请求，各带上下文（视频标题、前后的字幕）；重复句子只翻一次
   {
     const lines = Array.from({ length: 3000 }, (_, i) => `This is line number ${i}`).concat(['This is line number 0']);
     const r = await run({ url: URL_EN, body: json3(lines), args: ARGS(K1) });
     const calls = deeplCalls(r);
-    assert.ok(calls.length <= 2, `3000 句应该只要 1～2 个请求，实际 ${calls.length}`);
+    assert.strictEqual(calls.length, 50, `3000 句应该分成 50 个请求，实际 ${calls.length}`);
     assert.strictEqual(calls.reduce((n, c) => n + c.cues, 0), 3000);
-    assert.ok(calls.every((c) => c.xml && c.n <= 50));
+    assert.ok(calls.every((c) => c.xml && c.n === 1));
+    assert.strictEqual(calls[0].context, 'Video: Fixing a squeaky door — Handy Dan\nAfter: ' + lines.slice(60, 67).join(' '), '第一段：视频标题和后面 7 句');
+    assert.ok(calls.every((c) => c.context.startsWith('Video: Fixing a squeaky door')), '每段都带视频标题');
+    assert.ok(calls.some((c) => c.context.includes('This is line number 59\nAfter: This is line number 120')), '前面的字幕接到这一段之前，后面的接在之后');
+    assert.strictEqual(r.calls.filter((c) => c.vendor === 'oembed').length, 1, '标题只查一次');
     assert.strictEqual(events(r.out)[3000], 'This is line number 0\n译:This is line number 0');
-    console.log(`ok  3000 句打包成 ${calls.length} 个请求，重复句子不重复翻，用时 ${r.seconds.toFixed(2)} 秒`);
+    console.log(`ok  3000 句分成 ${calls.length} 个请求、各带上下文和视频标题，重复句子不重复翻，用时 ${r.seconds.toFixed(2)} 秒`);
   }
 
   // 5. DeepL 把标签合并了（对不上）→ 这一组逐句重翻
@@ -291,7 +311,7 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     assert.ok(done > 0 && done < 12000, `应该只翻了一部分，实际 ${done}`);
     assert.strictEqual(out[11999], 'Cue 11999', '没翻完的保持原文');
     assert.ok(r.seconds < 4, `应该在限时附近返回，实际 ${r.seconds} 秒`);
-    const r2 = await run({ url: URL_EN, body: json3(lines), args, store: r.store, latency: 100 });
+    const r2 = await run({ url: URL_EN, body: json3(lines), args, store: r.store, latency: 30 });
     assert.strictEqual(events(r2.out).filter((l) => l.includes('译:')).length, 12000, '第二次把剩下的翻完');
     assert.strictEqual(deeplCalls(r2).reduce((n, c) => n + c.cues, 0), 12000 - done, '第二次只翻剩下的');
     console.log(`ok  限时 3 秒：第一次 ${r.seconds.toFixed(1)} 秒返回 ${done} 句，第二次接着翻完剩下的`);
@@ -739,6 +759,73 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     await run({ url: 'https://www.youtube.com/api/timedtext?lang=en&fmt=json3', body: json3(['No id here']), args: ARGS(K1), store: store2 });
     assert.ok((await runExport('https://yt-subtitles.internal/', store2)).body.includes('1 句，译文 1 句'));
     console.log('ok  翻译超时也能导出原文；地址里没有视频 ID 也照样记下');
+  }
+
+  // 17e. 整句文稿：自动字幕没有标点，攒到 400 字左右、在停顿最长的地方分段；一段英文一段中文，几段打包、带上下文翻
+  {
+    const store = {};
+    // 每句 3 秒；每 12 句后停顿 6 秒，分段应该落在这些停顿上
+    const events = [];
+    let t = 0;
+    for (let i = 0; i < 120; i++) {
+      events.push({ tStartMs: t, dDurationMs: 3000, segs: [{ utf8: `piece ${i} of the long talk` }] });
+      t += i % 12 === 11 ? 9000 : 3000;
+    }
+    await run({ url: URL_EN, body: JSON.stringify({ events }), args: ARGS(K1), store });
+    const r = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=doc', store);
+    const en = [...r.body.matchAll(/<p class="en">([^<]*)<\/p>/g)].map((m) => m[1]);
+    const zh = [...r.body.matchAll(/<p class="zh">([^<]*)<\/p>/g)].map((m) => m[1]);
+    assert.ok(en.length >= 5 && en.length <= 12, `段数 ${en.length}`);
+    assert.ok(en.slice(0, -1).every((p) => p.length >= 280 && p.length <= 650), en.map((p) => p.length).join(','));
+    assert.ok(en.slice(0, -1).every((p) => Number(/piece (\d+) of the long talk$/.exec(p)[1]) % 12 === 11), '分段落在停顿上：' + en.map((p) => p.slice(-24)).join(' | '));
+    assert.strictEqual(en.join(' '), events.map((e) => e.segs[0].utf8).join(' '), '合起来就是全部字幕，一句不丢');
+    assert.deepStrictEqual(zh, en.map((p) => '译:' + p), '每段英文下面跟着它的中文');
+    const d = r.calls.filter((c) => c.vendor === 'deepl');
+    assert.ok(d.every((c) => c.xml && c.n === 1 && c.context.startsWith('Video: Fixing a squeaky door — Handy Dan')), '几段打包成一次、带视频标题');
+    assert.ok(d.length >= 1 && d.length <= 3);
+    // 再打开：走存好的文稿，不再请求
+    const again = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=doc', store);
+    assert.ok(!again.calls.some((c) => c.vendor === 'deepl'));
+    const txt = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=doctxt', store);
+    assert.strictEqual(txt.headers['Content-Disposition'], 'attachment; filename="vid1.transcript.txt"');
+    assert.strictEqual(txt.body, en.map((p) => p + '\n译:' + p).join('\n\n') + '\n');
+    // 首页有入口
+    assert.ok((await runExport('https://yt-subtitles.internal/?v=vid1', store)).body.includes('fmt=doc'));
+    console.log(`ok  整句文稿：自动字幕 120 句分成 ${en.length} 段、落在停顿上，一段英文一段中文，${d.length} 个请求带上下文，再打开走存好的`);
+  }
+
+  // 17f. 整句文稿：人工字幕有标点就按句子合段；中文字幕不翻；DeepL 用不了用 Google；上下文里有前后段
+  {
+    const store = {};
+    const sentences = Array.from({ length: 40 }, (_, i) => `Sentence number ${i} explains one small idea.`);
+    // 句子跨字幕切开：每句拆成两半
+    const halves = sentences.flatMap((x) => { const w = x.split(' '); return [w.slice(0, 3).join(' '), w.slice(3).join(' ')]; });
+    await run({ url: URL_EN.replace('vid1', 'doc2'), body: json3(halves), args: ARGS(K1), store });
+    const r = await runExport('https://yt-subtitles.internal/?v=doc2&fmt=doc', store);
+    const en = [...r.body.matchAll(/<p class="en">([^<]*)<\/p>/g)].map((m) => m[1]);
+    assert.ok(en.every((p) => p.endsWith('idea.')), '按句子分段，不在句子中间断开');
+    assert.ok(en.slice(0, -1).every((p) => p.length >= 420));
+    assert.strictEqual(en.join(' '), sentences.join(' '));
+
+    const r2 = await runExport('https://yt-subtitles.internal/?v=doc3&fmt=doc', {
+      'yt-subtitles-export': JSON.stringify([{ v: 'doc3', lang: 'en', target: 'ZH-HANS', cues: halves.map((h, i) => [i * 1000, 1000, h, '']) }]),
+    }, { behavior: 456 });
+    assert.ok(r2.body.includes('<p class="zh">谷:'), 'DeepL 额度用完用 Google');
+
+    const zhStore = {};
+    await run({ url: URL_EN.replace('vid1', 'doc4').replace('lang=en', 'lang=zh-Hans'), body: json3(['第一句话。', '第二句话。']), args: ARGS(K1), store: zhStore });
+    const r3 = await runExport('https://yt-subtitles.internal/?v=doc4&fmt=doc', zhStore);
+    assert.ok(r3.body.includes('第一句话。') && !r3.body.includes('class="zh"'));
+    assert.strictEqual(r3.calls.length, 0, '中文字幕不翻');
+    console.log('ok  整句文稿：人工字幕按句子分段，中文字幕不翻，DeepL 用不了用 Google');
+  }
+
+  // 17g. 评论只用 DeepL 时也带上下文：哪个视频下面的评论
+  {
+    const r = await runComments({ upstream: commentsPb(COMMENTS) });
+    const d = r.calls.filter((c) => c.vendor === 'deepl');
+    assert.ok(d.length && d.every((c) => c.context && c.context.startsWith('YouTube comments under the video: ')), JSON.stringify(d.map((c) => c.context)));
+    console.log('ok  评论只用 DeepL 时也带视频标题当上下文');
   }
 
   // 18. 导出的时间轴：srv3（毫秒）、srv1（秒）、WebVTT；自动字幕重叠的结束时间截到下一句
