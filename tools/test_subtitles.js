@@ -828,8 +828,8 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  评论只用 DeepL 时也带视频标题当上下文');
   }
 
-  // 17h. 原文和 Claude：复制原文是合成段落的英文；在 Claude 中打开用 claude://claude.ai/new?q=，带视频标题；
-  // 给快捷指令的两个地址直接返回文字；太长就只在链接里放提示，原文靠剪贴板；都不用翻译
+  // 17h. 原文和 Claude：复制原文是合成段落的英文；在 Claude 中打开用 claude://claude.ai/new?q=，链接里只带提示词和视频标题
+  // （Claude 会把长文字整段变成文件，提示词混在里面就看不见），原文放剪贴板粘贴成附件；都不用翻译
   {
     const store = {};
     const lines = Array.from({ length: 30 }, (_, i) => `talking point ${i} goes here`);
@@ -837,29 +837,29 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     const original = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=original', store);
     assert.ok(original.headers['Content-Type'].startsWith('text/plain'));
     assert.strictEqual(original.body.replace(/\n\n/g, ' ').trim(), lines.join(' '), '原文就是全部字幕，合成段落');
+    for (const fmt of ['paste', 'prompt']) {
+      assert.strictEqual((await runExport(`https://yt-subtitles.internal/?v=vid1&fmt=${fmt}`, store)).body, original.body, `?fmt=${fmt}：快捷指令放剪贴板的是原文`);
+    }
     const link = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=claudeurl', store);
     assert.ok(link.body.startsWith('claude://claude.ai/new?q='));
     const prompt = decodeURIComponent(link.body.slice('claude://claude.ai/new?q='.length));
     assert.ok(prompt.startsWith('Below is a full transcript of a video. Give me a detailed summary in Chinese'), prompt.slice(0, 80));
     assert.ok(prompt.includes('5. Anything the speaker says is important') && prompt.includes('completeness matters more than brevity.'));
-    assert.ok(prompt.endsWith('Transcript:\nVideo title: Fixing a squeaky door — Handy Dan\n\n' + original.body.trim()), '原文放在 Transcript: 后面，前面一行视频标题');
-    assert.ok(!prompt.includes('[paste here]'));
-    const full = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=prompt', store);
-    assert.strictEqual(full.body, prompt, '剪贴板用的完整内容和链接里的一样：提示词 + 原文');
+    assert.ok(prompt.endsWith('Transcript:\nVideo title: Fixing a squeaky door — Handy Dan\n(The full transcript is in the attached file.)'), prompt.slice(-120));
+    assert.ok(!prompt.includes('talking point') && !prompt.includes('[paste here]'), '链接里不带原文');
     const page = await runExport('https://yt-subtitles.internal/?v=vid1', store);
     assert.ok(page.body.includes('在 Claude 中打开原文') && page.body.includes('复制原文') && page.body.includes(JSON.stringify(link.body)));
-    assert.ok(page.body.includes('copy("claude",prompt,'), '按钮复制的是提示词 + 原文');
+    assert.ok(page.body.includes('copy("claude",original,'), '按钮先复制原文再打开 Claude');
     for (const r of [original, link, page]) assert.ok(!r.calls.some((c) => c.vendor === 'deepl' || c.vendor === 'google'), '不用翻译');
 
-    // 很长的视频：链接里只放提示
+    // 很长的视频：链接还是只带提示词，原文照样能取
     const longStore = {};
     const many = Array.from({ length: 4000 }, (_, i) => `a fairly long line of speech number ${i}`);
     await run({ url: URL_EN.replace('vid1', 'long1'), body: json3(many), args: ARGS('', '&fallback=off'), store: longStore });
     const longLink = await runExport('https://yt-subtitles.internal/?v=long1&fmt=claudeurl', longStore);
-    assert.strictEqual(longLink.body, 'claude://claude.ai/new', '太长：只打开新对话，粘贴剪贴板里的完整内容');
-    const longFull = await runExport('https://yt-subtitles.internal/?v=long1&fmt=prompt', longStore);
-    assert.ok(longFull.body.startsWith('Below is a full transcript') && longFull.body.includes('a fairly long line of speech number 3999'));
-    console.log('ok  复制原文、在 Claude 中打开（带标题，太长改用剪贴板），给快捷指令的地址直接返回文字');
+    assert.ok(longLink.body.length < 3000 && decodeURIComponent(longLink.body).includes('(The full transcript is in the attached file.)'));
+    assert.ok((await runExport('https://yt-subtitles.internal/?v=long1&fmt=paste', longStore)).body.includes('a fairly long line of speech number 3999'));
+    console.log('ok  在 Claude 中打开：链接只带提示词和标题，原文放剪贴板粘贴成附件；复制原文、快捷指令的地址直接返回文字');
   }
 
   // 17i. 记下实际用了哪个翻译，给「翻译状态」面板看：DeepL 额度用完转 Google 也记清楚；全走缓存不记
@@ -887,8 +887,8 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     assert.strictEqual(r.calls.length, 0, '不发 DeepL、Google，也不查标题');
     const page = await runExport('https://yt-subtitles.internal/?v=sw1', store);
     assert.ok(page.body.includes('2 句，没有译文') && page.body.includes('字幕翻译：关着 · 点这里打开') && page.body.includes('translate=on'));
-    const link = await runExport('https://yt-subtitles.internal/?v=sw1&fmt=claudeurl', store);
-    assert.ok(decodeURIComponent(link.body).includes('Only the original please No translation needed'), '发 Claude 照样有原文');
+    const paste = await runExport('https://yt-subtitles.internal/?v=sw1&fmt=paste', store);
+    assert.ok(paste.body.includes('Only the original please No translation needed'), '发 Claude 照样有原文');
     await runExport('https://yt-subtitles.internal/?translate=on', store);
     const r2 = await run({ url: URL_EN.replace('vid1', 'sw2'), body: json3(['Translate me again']), args: ARGS(K1), store });
     assert.ok(deeplCalls(r2).length === 1 && events(r2.out)[0].includes('译:'));
