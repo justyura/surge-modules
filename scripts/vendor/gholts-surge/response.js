@@ -353,7 +353,7 @@ SOFTWARE.
             blockVerticalLive = false,
             blockShorts = false,
             jumpAhead = true,
-            subtitleExport = false,
+            subtitleExport = true,
         } = {},
     ) {
         let changed = transformMenus(message, subtitleExport);
@@ -481,8 +481,10 @@ SOFTWARE.
         } catch (error) {
             console.log("YouTube speed menu: " + error);
         }
-        const videoId = message.currentVideoEndpoint?.watchEndpoint?.videoId;
-        if (subtitleExport && videoId) {
+        // get_watch / Onesie 里的 next 可能没有 currentVideoEndpoint；没有视频 ID
+        // 就打开不带 ID 的导出页，页面显示最近打开过字幕的视频
+        const videoId = message.currentVideoEndpoint?.watchEndpoint?.videoId ?? "";
+        if (subtitleExport) {
             try {
                 const menu = addSubtitleExportItem(overlay.overflowMenu, videoId);
                 changed = !sameBytes(menu, overlay.overflowMenu) || changed;
@@ -496,7 +498,7 @@ SOFTWARE.
     // Local patch: an "export subtitles" item in the player overflow menu. It is
     // a copy of "help and feedback" whose tap opens a URL that the subtitles
     // module (scripts/youtube-subtitles.js) answers locally with the subtitles.
-    const EXPORT_URL = "https://yt-subtitles.internal/?v=";
+    const EXPORT_URL = "https://yt-subtitles.internal/";
     const EXPORT_ID = "menu_item_export_subtitles";
     const EXPORT_STATE = "/youtube/app/player_overflow_menu/" + EXPORT_ID;
     const MENU_ITEM_MODEL = [153515154, 172660663, 1, 168777401, 5, 407694004];
@@ -513,7 +515,7 @@ SOFTWARE.
             encodeField(
                 [49679253, "", "bytes"],
                 concatBytes([
-                    stringField(1, EXPORT_URL + encodeURIComponent(videoId)),
+                    stringField(1, EXPORT_URL + (videoId ? "?v=" + encodeURIComponent(videoId) : "")),
                     varint(2 * 8),
                     varint(1),
                 ]),
@@ -546,7 +548,10 @@ SOFTWARE.
             const items = fields.filter((field) => field.no === 1 && field.wire === 2);
             if (items.some((field) => has(field, EXPORT_ID))) return menu;
             const template = items.find((field) => has(field, "menu_item_help_and_feedback"));
-            if (!template) return menu;
+            if (!template) {
+                console.log("YouTube subtitle export: no help item to copy");
+                return menu;
+            }
             const anchor =
                 items.find((field) => has(field, "menu_item_captions")) ??
                 items[items.length - 1];

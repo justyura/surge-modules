@@ -108,5 +108,15 @@ const titles = (buf) => items(buf).map((it) => at(it, [...MODEL, 4, 3])[0].toStr
     console.log('ok  不重复加，开关能关，没有模板不加，没有「字幕」加在最后');
   }
 
+  // 3. next 里没有视频 ID（get_watch / Onesie）：照样加，打开不带 ID 的导出页；参数里没有这个开关也当开着
+  {
+    const noId = Buffer.concat([field(14, nest([78882851, 2, 66439850], Buffer.concat(STANDARD)))]);
+    const out = await run(noId, {});
+    assert.deepStrictEqual(titles(out), ['画质', '字幕', '导出字幕', '帮助和反馈']);
+    const url = at(items(out)[2], [...MODEL, 4, 4, 169495254, 49679253, 1])[0].toString();
+    assert.strictEqual(url, 'https://yt-subtitles.internal/');
+    console.log('ok  没有视频 ID 也加，打开最近的字幕；参数里没有开关默认开');
+  }
+
   console.log('全部通过');
 })().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

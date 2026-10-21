@@ -36,7 +36,7 @@
 +            blockVerticalLive = false,
 +            blockShorts = false,
 +            jumpAhead = true,
-+            subtitleExport = false,
++            subtitleExport = true,
 +        } = {},
      ) {
 -        let changed = transformMenus(message);
@@ -67,7 +67,7 @@
                  );
                  changed = keep.length !== object[field].length || changed;
                  if (object[field].length && !keep.length) emptied.add(object);
-@@ -451,18 +470,91 @@
+@@ -451,18 +470,96 @@
              }
          return changed;
      }
@@ -86,8 +86,10 @@
              console.log("YouTube speed menu: " + error);
 -            return false;
          }
-+        const videoId = message.currentVideoEndpoint?.watchEndpoint?.videoId;
-+        if (subtitleExport && videoId) {
++        // get_watch / Onesie 里的 next 可能没有 currentVideoEndpoint；没有视频 ID
++        // 就打开不带 ID 的导出页，页面显示最近打开过字幕的视频
++        const videoId = message.currentVideoEndpoint?.watchEndpoint?.videoId ?? "";
++        if (subtitleExport) {
 +            try {
 +                const menu = addSubtitleExportItem(overlay.overflowMenu, videoId);
 +                changed = !sameBytes(menu, overlay.overflowMenu) || changed;
@@ -101,7 +103,7 @@
 +    // Local patch: an "export subtitles" item in the player overflow menu. It is
 +    // a copy of "help and feedback" whose tap opens a URL that the subtitles
 +    // module (scripts/youtube-subtitles.js) answers locally with the subtitles.
-+    const EXPORT_URL = "https://yt-subtitles.internal/?v=";
++    const EXPORT_URL = "https://yt-subtitles.internal/";
 +    const EXPORT_ID = "menu_item_export_subtitles";
 +    const EXPORT_STATE = "/youtube/app/player_overflow_menu/" + EXPORT_ID;
 +    const MENU_ITEM_MODEL = [153515154, 172660663, 1, 168777401, 5, 407694004];
@@ -118,7 +120,7 @@
 +            encodeField(
 +                [49679253, "", "bytes"],
 +                concatBytes([
-+                    stringField(1, EXPORT_URL + encodeURIComponent(videoId)),
++                    stringField(1, EXPORT_URL + (videoId ? "?v=" + encodeURIComponent(videoId) : "")),
 +                    varint(2 * 8),
 +                    varint(1),
 +                ]),
@@ -151,7 +153,10 @@
 +            const items = fields.filter((field) => field.no === 1 && field.wire === 2);
 +            if (items.some((field) => has(field, EXPORT_ID))) return menu;
 +            const template = items.find((field) => has(field, "menu_item_help_and_feedback"));
-+            if (!template) return menu;
++            if (!template) {
++                console.log("YouTube subtitle export: no help item to copy");
++                return menu;
++            }
 +            const anchor =
 +                items.find((field) => has(field, "menu_item_captions")) ??
 +                items[items.length - 1];
@@ -163,7 +168,7 @@
      }
      function unlockSpeedMenu(bytes) {
          const upsell = textEncoder.encode("PApremium_upsell");
-@@ -529,6 +621,7 @@
+@@ -529,6 +626,7 @@
              );
          if (player.playbackTracking)
              delete player.playbackTracking.pageadViewthroughconversion;
@@ -171,7 +176,7 @@
          const status = player.playabilityStatus;
          if (status) {
              status.pictureInPictureRender ??= {};
-@@ -548,6 +641,41 @@
+@@ -548,6 +646,41 @@
          }
          return true;
      }
@@ -213,7 +218,7 @@
      function removeShortsAds(message) {
          const keep = message.entries.filter(
              (entry) => !entry.command?.reelWatchEndpoint?.adClientParams?.isAd,
-@@ -711,10 +839,13 @@
+@@ -711,10 +844,13 @@
          ReelShelfRenderer: [[1, "richItemContents", "RichItemContent", true]],
          Next: [
              [7, "content", "NextContent"],
@@ -227,7 +232,7 @@
          EngagementPanel: [[138681066, "renderer", "EngagementPanelRenderer"]],
          EngagementPanelRenderer: [[3, "content", "BrowseContent"]],
          NextContent: [[51779735, "nextResult", "NextResult"]],
-@@ -741,6 +872,22 @@
+@@ -741,6 +877,22 @@
              [2, "playabilityStatus", "PlayabilityStatus"],
              [9, "playbackTracking", "PlaybackTracking"],
              [68, "adSlots", "bytes", true],

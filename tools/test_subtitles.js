@@ -703,6 +703,30 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  字幕导出：双语 / 原文 / 译文 SRT 和纯文本，没打开过字幕有提示，只记最近 2 个视频，中文字幕也能导出');
   }
 
+  // 17b. 导出页不带视频 ID（菜单拿不到 ID 时）：显示最近打开过字幕的视频
+  {
+    const store = {};
+    await run({ url: URL_EN.replace('vid1', 'old1'), body: json3(['Old one']), args: ARGS(K1), store });
+    await run({ url: URL_EN.replace('vid1', 'new1'), body: json3(['New one']), args: ARGS(K1), store });
+    const latest = await runExport('https://yt-subtitles.internal/', store);
+    assert.ok(latest.body.includes('视频 new1') && latest.body.includes('v=new1&mode=both&fmt=srt'), latest.body);
+    assert.ok((await runExport('https://yt-subtitles.internal/', {})).body.includes('还没有这个视频的字幕'));
+    console.log('ok  导出页不带视频 ID 时显示最近打开过字幕的视频');
+  }
+
+  // 17c. 字幕数据不对（json3 没有 events，含 YouTube 自带翻译的轨道）：马上原样放行，不能卡到 App 报「加载字幕时出错」
+  {
+    for (const url of [URL_EN, URL_EN + '&tlang=zh-Hans']) {
+      const r = await run({ url, body: '{"wireMagic":"pb3"}', args: ARGS(K1) });
+      assert.deepStrictEqual(r.out, {});
+      assert.ok(r.seconds < 1, `应该马上放行，实际 ${r.seconds} 秒`);
+    }
+    const r2 = await run({ url: URL_EN, body: '{not json', args: ARGS(K1) });
+    assert.deepStrictEqual(r2.out, {});
+    assert.ok(r2.seconds < 1);
+    console.log('ok  字幕数据不对时马上原样放行，不会卡住');
+  }
+
   // 18. 导出的时间轴：srv3（毫秒）、srv1（秒）、WebVTT；自动字幕重叠的结束时间截到下一句
   {
     const store = {};

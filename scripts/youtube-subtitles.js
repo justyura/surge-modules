@@ -883,12 +883,12 @@ var FORMATS = {
   // json3：{ events: [{ segs: [{ utf8 }] }] }，自动生成字幕是一个词一个 seg
   json3: {
     texts: function (doc) {
-      return doc.events.map(function (e) {
+      return (doc.events || []).map(function (e) {
         return e.segs ? e.segs.map(function (s) { return s.utf8 || ''; }).join('').trim() : '';
       });
     },
     apply: function (doc, texts, map, notes) {
-      doc.events.forEach(function (e, i) {
+      (doc.events || []).forEach(function (e, i) {
         if (!texts[i]) return;
         e.segs = [{ utf8: combine(texts[i], map[texts[i]], notes[i]) }];
         delete e.wWinId; // 自动字幕的滚动窗口，去掉后按普通字幕显示
@@ -896,7 +896,7 @@ var FORMATS = {
       return doc;
     },
     times: function (doc) {
-      return doc.events.map(function (e) { return [e.tStartMs || 0, e.dDurationMs || 0]; });
+      return (doc.events || []).map(function (e) { return [e.tStartMs || 0, e.dDurationMs || 0]; });
     },
     parse: function (body) { return JSON.parse(body); },
     stringify: function (doc) { return JSON.stringify(doc); },
@@ -1266,6 +1266,10 @@ function loadExports() {
 
 // 每句存成 [开始毫秒, 时长毫秒, 原文, 译文]
 function remember(url, handler, doc, texts, map) {
+  try { rememberCues(url, handler, doc, texts, map); } catch (e) { log('记录导出用的字幕出错：' + e.message); }
+}
+
+function rememberCues(url, handler, doc, texts, map) {
   var v = param(url, 'v');
   if (!v || !handler.times) return;
   var times = handler.times(doc);
@@ -1319,7 +1323,9 @@ function page(title, inner) {
 function exportMain() {
   var url = $request.url;
   var v = param(url, 'v');
-  var entry = loadExports().filter(function (e) { return e.v === v; })[0];
+  var exports = loadExports();
+  // 不带视频 ID（按钮拿不到 ID 时）：用最近打开过字幕的那个视频
+  var entry = v ? exports.filter(function (e) { return e.v === v; })[0] : exports[0];
   var html = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };
   if (!entry) {
     return { response: { status: 200, headers: html, body: page('导出字幕', '<h1>还没有这个视频的字幕</h1>'
@@ -1439,7 +1445,8 @@ function arm(seconds) {
 }
 arm(COMMENTS ? COMMENT_FETCH_TIMEOUT + 2 : ARGS.budget + 3);
 
-(EXPORT ? Promise.resolve(exportMain()) : COMMENTS ? commentsMain() : main()).then(finish, function (error) {
+// 同步抛出的异常也要接住：不接的话 $done 永远不调，App 等到超时报「加载字幕时出错」
+Promise.resolve().then(function () { return EXPORT ? exportMain() : COMMENTS ? commentsMain() : main(); }).then(finish, function (error) {
   log('出错：' + (error && error.message));
   finish(COMMENTS ? commentFallback : null);
 });
