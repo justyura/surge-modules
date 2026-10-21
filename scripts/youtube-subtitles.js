@@ -1270,15 +1270,24 @@ function remember(url, handler, doc, texts, map) {
 }
 
 function rememberCues(url, handler, doc, texts, map) {
-  var v = param(url, 'v');
-  if (!v || !handler.times) return;
+  // 地址里没有视频 ID 也照样记：导出页不带 ID 时显示最近的那个
+  var v = param(url, 'v') || param(url, 'video_id') || 'latest';
+  if (!handler.times) return;
   var times = handler.times(doc);
   var cues = [];
   texts.forEach(function (t, i) { if (t && times[i]) cues.push([times[i][0], times[i][1], t, map[t] || '']); });
   if (!cues.length) return;
   var list = loadExports().filter(function (e) { return e.v !== v; });
-  list.unshift({ v: v, lang: param(url, 'lang') || param(url, 'tlang'), target: ARGS.target, cues: cues });
-  try { $persistentStore.write(JSON.stringify(list.slice(0, EXPORT_VIDEOS)), EXPORT_STORE_KEY); } catch (e) {}
+  var entry = { v: v, lang: param(url, 'lang') || param(url, 'tlang'), target: ARGS.target, cues: cues };
+  list.unshift(entry);
+  var ok = false;
+  try { ok = $persistentStore.write(JSON.stringify(list.slice(0, EXPORT_VIDEOS)), EXPORT_STORE_KEY); } catch (e) {}
+  // 写不进去（多半是太大）就只留这一个视频
+  if (ok === false) {
+    try { ok = $persistentStore.write(JSON.stringify([entry]), EXPORT_STORE_KEY); } catch (e) {}
+  }
+  var translated = cues.filter(function (c) { return c[3]; }).length;
+  log('记下 ' + cues.length + ' 句字幕（译文 ' + translated + ' 句）给导出用' + (ok === false ? '，但写入失败' : ''));
 }
 
 function srtTime(ms) {
@@ -1397,6 +1406,8 @@ function main() {
   var cacheId = [param(url, 'v'), lang, param(url, 'kind'), ARGS.target].concat(useLlm ? [ARGS.model, ARGS.style] : []).join('|');
   var entry = state.cache.filter(function (c) { return c.id === cacheId; })[0];
   var cached = entry ? entry.map : {};
+  // 先记一份（原文 + 缓存里的译文）：翻译超时被兜底提前返回时，后面那次记录可能来不及跑
+  remember(url, handler, doc, texts, cached);
   // DeepL 的源语言写法：en、ja → EN、JA；自动生成字幕的语言也能用
   var source = lang ? lang.split('-')[0].toUpperCase() : '';
 

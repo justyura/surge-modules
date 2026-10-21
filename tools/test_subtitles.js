@@ -727,6 +727,20 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  字幕数据不对时马上原样放行，不会卡住');
   }
 
+  // 17d. 翻译超时、脚本被兜底提前返回：字幕照样已经记下，可以导出原文
+  {
+    const store = {};
+    const r = await run({ url: URL_EN.replace('vid1', 'slow1'), body: json3(['First line', 'Second line']), args: ARGS(K1, '&budget=3'), behavior: { [K1]: 'hang' }, store });
+    assert.deepStrictEqual(r.out, {}, '超时原样返回');
+    const page = await runExport('https://yt-subtitles.internal/', store);
+    assert.ok(page.body.includes('视频 slow1') && page.body.includes('2 句，没有译文'), page.body);
+    // 地址里没有 v=：照样记下，导出页显示最近的
+    const store2 = {};
+    await run({ url: 'https://www.youtube.com/api/timedtext?lang=en&fmt=json3', body: json3(['No id here']), args: ARGS(K1), store: store2 });
+    assert.ok((await runExport('https://yt-subtitles.internal/', store2)).body.includes('1 句，译文 1 句'));
+    console.log('ok  翻译超时也能导出原文；地址里没有视频 ID 也照样记下');
+  }
+
   // 18. 导出的时间轴：srv3（毫秒）、srv1（秒）、WebVTT；自动字幕重叠的结束时间截到下一句
   {
     const store = {};
