@@ -94,6 +94,13 @@ function run(args, llm = {}, { deepl = {}, store = {} } = {}) {
     console.log('ok  DeepL 额度用完：提示实际会用 Google；正常时绿色');
   }
 
+  // 1d. 字幕翻译关着：面板上写出来
+  {
+    const { panel } = await run(`keys=${D1}`, {}, { store: { 'yt-subtitles-switch': JSON.stringify({ translate: false }) } });
+    assert.ok(panel.content.split('\n')[1].startsWith('YouTube 字幕翻译：关着'), panel.content);
+    console.log('ok  字幕翻译关着时面板上显示');
+  }
+
   // 2. 正常：gpt-6-luna 自动关掉思考，带上下文，译文里是银行
   {
     const { panel, calls } = await run(`llmkeys=${L1}&model=gpt-6-luna&api=https://api.openai.com/v1&effort=auto&target=ZH-HANS`, { [L1]: { reply: GOOD } });

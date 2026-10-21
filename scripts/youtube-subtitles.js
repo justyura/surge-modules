@@ -65,6 +65,7 @@ var NOTE_CHARS = 10;             // 释义最多几个字
 var EXPORT_STORE_KEY = 'yt-subtitles-export';
 var EXPORT_VIDEOS = 2;           // 记最近几个视频的字幕给导出用
 var EXPORT_HOST = /^https?:\/\/yt-subtitles\.internal\//;
+var SWITCH_STORE_KEY = 'yt-subtitles-switch';  // 导出页上的「字幕翻译」开关：{ translate: false } 时只记原文
 var USAGE_STORE_KEY = 'translate-usage';  // 最近几次实际用了哪个翻译，「翻译状态」面板读
 var USAGE_RECORDS = 10;
 var COMMENT_STORE_KEY = 'yt-comments-translations';
@@ -157,6 +158,11 @@ function request(method, options) {
       resolve({ error: error, status: status, body: body });
     });
   });
+}
+
+// 导出页上关掉「字幕翻译」时，字幕照样记下来（导出、发 Claude 用），只是不翻译、不花额度
+function subtitleTranslateOn() {
+  try { return JSON.parse($persistentStore.read(SWITCH_STORE_KEY) || '{}').translate !== false; } catch (e) { return true; }
 }
 
 // ---------- 记下这次实际用了哪个翻译（大模型 / DeepL / Google），给「翻译状态」面板看 ----------
@@ -1550,13 +1556,23 @@ function claudeUrl(title, text) {
 async function exportMain() {
   var url = $request.url;
   var v = param(url, 'v');
+  // 「字幕翻译」开关：?translate=off / on，存下来再回到导出页
+  var set = param(url, 'translate');
+  if (set === 'on' || set === 'off') {
+    try { $persistentStore.write(JSON.stringify({ translate: set === 'on' }), SWITCH_STORE_KEY); } catch (e) {}
+    return { response: { status: 302, headers: { Location: '/' + (v ? '?v=' + encodeURIComponent(v) : ''), 'Cache-Control': 'no-store' } } };
+  }
+  var translateOn = subtitleTranslateOn();
+  var toggle = '<a class="b" href="/?' + (v ? 'v=' + encodeURIComponent(v) + '&' : '') + 'translate=' + (translateOn ? 'off' : 'on') + '">'
+    + (translateOn ? '字幕翻译：开着 · 点这里关掉（只发 Claude 时不花 DeepL 额度）' : '字幕翻译：关着 · 点这里打开') + '</a>';
   var exports = loadExports();
   // 不带视频 ID（按钮拿不到 ID 时）：用最近打开过字幕的那个视频
   var entry = v ? exports.filter(function (e) { return e.v === v; })[0] : exports[0];
   var html = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };
   if (!entry) {
     return { response: { status: 200, headers: html, body: page('导出字幕', '<h1>还没有这个视频的字幕</h1>'
-      + '<p>先在 YouTube 里打开字幕，等字幕显示出来（双语的话等译文出来），再打开这个页面。最近 ' + EXPORT_VIDEOS + ' 个打开过字幕的视频可以导出。</p>') } };
+      + '<p>先在 YouTube 里打开字幕，等字幕显示出来（双语的话等译文出来），再打开这个页面。最近 ' + EXPORT_VIDEOS + ' 个打开过字幕的视频可以导出。</p>'
+      + toggle) } };
   }
   var mode = /^(both|original|translation)$/.test(param(url, 'mode')) ? param(url, 'mode') : 'both';
   var fmt = param(url, 'fmt');
@@ -1616,6 +1632,7 @@ async function exportMain() {
     + '<p>视频 ' + escapeHtml(entry.v) + ' · ' + escapeHtml(entry.lang || '未知语言') + ' · ' + entry.cues.length + ' 句'
     + (translated ? '，译文 ' + translated + ' 句' : '，没有译文') + '</p>'
     + '<button id="claude" class="main">在 Claude 中打开原文</button>'
+    + toggle
     + '<button id="orig">复制原文</button>'
     + buttons
     + '<button id="copy">复制双语文字</button>'
@@ -1648,8 +1665,9 @@ function main() {
   if (lang && lang.split('-')[0] === ARGS.target.split('-')[0].toLowerCase()) return skip('已经是目标语言，跳过');
   var wantVocab = !!ARGS.vocab && (!lang || lang.split('-')[0] === 'en');
   var useLlm = ARGS.llmKeyList.length > 0;
-  var canTranslate = canTranslateAny();
-  if (!canTranslate && !wantVocab) return skip('没有可用的 DeepL key');
+  var translateOn = subtitleTranslateOn();
+  var canTranslate = translateOn && canTranslateAny();
+  if (!canTranslate && !wantVocab) return skip(translateOn ? '没有可用的 DeepL key' : '字幕翻译关着，只记原文给导出用');
 
   var seen = {};
   var unique = texts.filter(function (t) { if (!t || seen[t]) return false; seen[t] = true; return true; });

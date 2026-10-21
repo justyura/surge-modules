@@ -872,6 +872,26 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  记下每次实际用了 DeepL 还是 Google（失败原因也记），全走缓存不记');
   }
 
+  // 17j. 「字幕翻译」开关：导出页上关掉后，字幕照样记下来能导出、发 Claude，但不翻译、不花额度；再打开恢复
+  {
+    const store = {};
+    const off = await runExport('https://yt-subtitles.internal/?v=sw1&translate=off', store);
+    assert.strictEqual(off.status, 302);
+    assert.strictEqual(off.headers.Location, '/?v=sw1');
+    const r = await run({ url: URL_EN.replace('vid1', 'sw1'), body: json3(['Only the original please', 'No translation needed']), args: ARGS(K1), store });
+    assert.deepStrictEqual(r.out, {}, '字幕原样返回');
+    assert.strictEqual(r.calls.length, 0, '不发 DeepL、Google，也不查标题');
+    const page = await runExport('https://yt-subtitles.internal/?v=sw1', store);
+    assert.ok(page.body.includes('2 句，没有译文') && page.body.includes('字幕翻译：关着 · 点这里打开') && page.body.includes('translate=on'));
+    const link = await runExport('https://yt-subtitles.internal/?v=sw1&fmt=claudeurl', store);
+    assert.ok(decodeURIComponent(link.body).includes('Only the original please No translation needed'), '发 Claude 照样有原文');
+    await runExport('https://yt-subtitles.internal/?translate=on', store);
+    const r2 = await run({ url: URL_EN.replace('vid1', 'sw2'), body: json3(['Translate me again']), args: ARGS(K1), store });
+    assert.ok(deeplCalls(r2).length === 1 && events(r2.out)[0].includes('译:'));
+    assert.ok((await runExport('https://yt-subtitles.internal/', store)).body.includes('字幕翻译：开着 · 点这里关掉'));
+    console.log('ok  字幕翻译开关：关着只记原文、不花额度，导出和发 Claude 照常；打开后恢复翻译');
+  }
+
   // 18. 导出的时间轴：srv3（毫秒）、srv1（秒）、WebVTT；自动字幕重叠的结束时间截到下一句
   {
     const store = {};

@@ -555,6 +555,7 @@ async function main() {
   var deepl = ARGS.deeplKeys.length ? await deeplLines() : null;
   var llm = ARGS.llmKeyList.length ? await llmLines() : null;
   var lines = ['在用：' + (using || '没有可用的翻译：填 DeepL 或大模型的 key，或者把「备用翻译」改成 google')];
+  if ((read('yt-subtitles-switch', {}) || {}).translate === false) lines.push('YouTube 字幕翻译：关着（只记原文给导出、发 Claude，不花额度）');
   lines = lines.concat(recent.lines);
   if (deepl) lines = lines.concat(deepl.lines);
   if (llm) lines = lines.concat(llm.lines);
