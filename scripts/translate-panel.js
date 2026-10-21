@@ -14,7 +14,11 @@
  *
  * 每点一次每个 key 发一个很小的请求，几百个 token。
  *
+ * mode=switch 时是另一个面板「字幕翻译」：点一下切换 YouTube 字幕翻译开关（和导出页上的是同一个），
+ * 关着时字幕只记原文给导出、发 Claude，不翻译、不花额度。靠 Surge 点面板时给的 $trigger === 'button' 认出是点的。
+ *
  * 参数（模块里的 argument，用 & 分隔）：
+ *   mode      switch：字幕翻译开关面板；不填：翻译状态面板
  *   keys      DeepL key，多个用 | 分隔
  *   fallback  google：DeepL 都用不了时用 Google；off：不用
  *   llmkeys   大模型 key，多个用 | 分隔
@@ -35,7 +39,7 @@ var BUDGET = 25;  // 秒，模块里脚本的 timeout 是 30
 var PAUSE = {};   // 面板只测试，不暂停 key
 
 function parseArgs(raw) {
-  var args = { keys: '', fallback: 'google', llmkeys: '', model: '', api: '', effort: '', style: 'faithful', target: 'ZH-HANS' };
+  var args = { mode: '', keys: '', fallback: 'google', llmkeys: '', model: '', api: '', effort: '', style: 'faithful', target: 'ZH-HANS' };
   String(raw || '').split('&').forEach(function (part) {
     var i = part.indexOf('=');
     if (i <= 0) return;
@@ -424,6 +428,7 @@ function finish(panel) { $done(panel); }
 
 var STATE_KEY = 'yt-subtitles-deepl';  // 和翻译脚本共用：哪个 DeepL key 在暂停
 var USAGE_KEY = 'translate-usage';
+var SWITCH_KEY = 'yt-subtitles-switch';  // 和 youtube-subtitles.js 共用：{ translate: false } 时字幕只记原文
 var NAMES = { llm: '大模型', deepl: 'DeepL', google: 'Google' };
 
 function read(key, fallback) {
@@ -555,7 +560,7 @@ async function main() {
   var deepl = ARGS.deeplKeys.length ? await deeplLines() : null;
   var llm = ARGS.llmKeyList.length ? await llmLines() : null;
   var lines = ['在用：' + (using || '没有可用的翻译：填 DeepL 或大模型的 key，或者把「备用翻译」改成 google')];
-  if ((read('yt-subtitles-switch', {}) || {}).translate === false) lines.push('YouTube 字幕翻译：关着（只记原文给导出、发 Claude，不花额度）');
+  if ((read(SWITCH_KEY, {}) || {}).translate === false) lines.push('YouTube 字幕翻译：关着（只记原文给导出、发 Claude，不花额度）');
   lines = lines.concat(recent.lines);
   if (deepl) lines = lines.concat(deepl.lines);
   if (llm) lines = lines.concat(llm.lines);
@@ -573,6 +578,22 @@ async function main() {
   finish(Object.assign({ title: title, content: lines.join('\n') }, STYLES[level]));
 }
 
-main().catch(function (error) {
+// 「字幕翻译」面板：点一下切换，自动刷新只显示
+function switchMain() {
+  var on = (read(SWITCH_KEY, {}) || {}).translate !== false;
+  if (typeof $trigger !== 'undefined' && $trigger === 'button') {
+    on = !on;
+    try { $persistentStore.write(JSON.stringify({ translate: on }), SWITCH_KEY); } catch (e) {}
+  }
+  finish({
+    title: '字幕翻译 · ' + (on ? '开着' : '关着'),
+    content: on ? '看视频时翻译字幕。点一下关掉：只记原文给导出、发 Claude，不花额度' : '只记原文，不翻译、不花额度。点一下打开',
+    icon: on ? 'character.bubble.fill' : 'character.bubble',
+    'icon-color': on ? '#34C759' : '#8E8E93',
+  });
+  return Promise.resolve();
+}
+
+(ARGS.mode === 'switch' ? switchMain() : main()).catch(function (error) {
   finish({ title: '翻译状态 · 出错了', content: String(error && error.message || error), icon: 'xmark.octagon.fill', 'icon-color': '#FF3B30' });
 });

@@ -889,6 +889,11 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     const r2 = await run({ url: URL_EN.replace('vid1', 'sw2'), body: json3(['Translate me again']), args: ARGS(K1), store });
     assert.ok(deeplCalls(r2).length === 1 && events(r2.out)[0].includes('译:'));
     assert.ok((await runExport('https://yt-subtitles.internal/', store)).body.includes('字幕翻译：开着 · 点这里关掉'));
+    // 给快捷指令（控制中心）用的切换：直接返回一句状态
+    const t1 = await runExport('https://yt-subtitles.internal/?translate=toggle', store);
+    assert.strictEqual(t1.body, '字幕翻译：已关掉（只记原文，不花额度）');
+    assert.ok(t1.headers['Content-Type'].startsWith('text/plain'));
+    assert.strictEqual((await runExport('https://yt-subtitles.internal/?translate=toggle', store)).body, '字幕翻译：已打开');
     console.log('ok  字幕翻译开关：关着只记原文、不花额度，导出和发 Claude 照常；打开后恢复翻译');
   }
 

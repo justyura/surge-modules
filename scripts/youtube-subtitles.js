@@ -1558,6 +1558,13 @@ async function exportMain() {
   var v = param(url, 'v');
   // 「字幕翻译」开关：?translate=off / on，存下来再回到导出页
   var set = param(url, 'translate');
+  // 给快捷指令（控制中心）用：切换一下，直接返回一句现在的状态，不跳网页
+  if (set === 'toggle') {
+    var nowOn = !subtitleTranslateOn();
+    try { $persistentStore.write(JSON.stringify({ translate: nowOn }), SWITCH_STORE_KEY); } catch (e) {}
+    return { response: { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+      body: nowOn ? '字幕翻译：已打开' : '字幕翻译：已关掉（只记原文，不花额度）' } };
+  }
   if (set === 'on' || set === 'off') {
     try { $persistentStore.write(JSON.stringify({ translate: set === 'on' }), SWITCH_STORE_KEY); } catch (e) {}
     return { response: { status: 302, headers: { Location: '/' + (v ? '?v=' + encodeURIComponent(v) : ''), 'Cache-Control': 'no-store' } } };

@@ -16,11 +16,12 @@ const D1 = '11111111-1111-1111-1111-111111111111:fx';
 const D2 = '22222222-2222-2222-2222-222222222222';
 
 // llm[key] = fake_llm 的设置，按 key 分开；deepl[key] = { used, limit } 或状态码；store = $persistentStore 里的内容
-function run(args, llm = {}, { deepl = {}, store = {} } = {}) {
+function run(args, llm = {}, { deepl = {}, store = {}, trigger } = {}) {
   const calls = [];
   return new Promise((resolve) => {
     const env = {
       $argument: args,
+      $trigger: trigger,
       $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
       $httpClient: {
         post(req, cb) {
@@ -99,6 +100,24 @@ function run(args, llm = {}, { deepl = {}, store = {} } = {}) {
     const { panel } = await run(`keys=${D1}`, {}, { store: { 'yt-subtitles-switch': JSON.stringify({ translate: false }) } });
     assert.ok(panel.content.split('\n')[1].startsWith('YouTube 字幕翻译：关着'), panel.content);
     console.log('ok  字幕翻译关着时面板上显示');
+  }
+
+  // 1e. 「字幕翻译」面板：点一下（$trigger 是 button）切换；自己刷新只显示，不切换
+  {
+    const store = {};
+    const shown = await run('mode=switch', {}, { store });
+    assert.strictEqual(shown.panel.title, '字幕翻译 · 开着');
+    assert.strictEqual(store['yt-subtitles-switch'], undefined, '没点不改');
+    const off = await run('mode=switch', {}, { store, trigger: 'button' });
+    assert.strictEqual(off.panel.title, '字幕翻译 · 关着');
+    assert.deepStrictEqual(JSON.parse(store['yt-subtitles-switch']), { translate: false });
+    assert.strictEqual((await run('mode=switch', {}, { store })).panel.title, '字幕翻译 · 关着');
+    const status = await run(`keys=${D1}`, {}, { store });
+    assert.ok(status.panel.content.includes('YouTube 字幕翻译：关着'), '翻译状态面板也看得到');
+    const on = await run('mode=switch', {}, { store, trigger: 'button' });
+    assert.strictEqual(on.panel.title, '字幕翻译 · 开着');
+    assert.strictEqual(shown.calls.length + off.calls.length + on.calls.length, 0, '不发任何请求');
+    console.log('ok  字幕翻译面板：点一下切换，自动刷新只显示，不发请求');
   }
 
   // 2. 正常：gpt-6-luna 自动关掉思考，带上下文，译文里是银行
