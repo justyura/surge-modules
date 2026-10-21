@@ -39,9 +39,9 @@
  * 的脚本占了（Surge 一个响应只跑一个脚本），所以在请求阶段认出评论请求，自己去 YouTube
  * 拿评论、翻译好直接当响应返回；其他请求原样放行。key、暂停状态、Google 兜底都和字幕共用。
  *
- * 还管字幕导出：处理字幕时把每句的时间、原文、译文记下来（最近 2 个视频）；播放器「更多」菜单里的
- * 「导出字幕」（「App 去广告合集」加的）打开 https://yt-subtitles.internal/?v=视频ID，这个地址由本脚本
- * 作为 http-request 脚本直接回应：一个下载页面，和双语 / 原文 / 译文的 SRT、纯文本。不会发到网上。
+ * 还管字幕导出：处理字幕时把每句的时间、原文、译文记下来（最近 2 个视频）。在 Safari 里打开
+ * https://yt-subtitles.internal/（可以带 ?v=视频ID），这个地址由本脚本作为 http-request 脚本直接回应：
+ * 一个下载页面，和双语 / 原文 / 译文的 SRT、纯文本。不会发到网上。
  */
 
 var STORE_KEY = 'yt-subtitles-deepl';
@@ -1329,7 +1329,7 @@ function exportMain() {
   var html = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };
   if (!entry) {
     return { response: { status: 200, headers: html, body: page('导出字幕', '<h1>还没有这个视频的字幕</h1>'
-      + '<p>先在播放器里打开字幕，等字幕显示出来（双语的话等译文出来），再点「导出字幕」。最近 ' + EXPORT_VIDEOS + ' 个打开过字幕的视频可以导出。</p>') } };
+      + '<p>先在 YouTube 里打开字幕，等字幕显示出来（双语的话等译文出来），再打开这个页面。最近 ' + EXPORT_VIDEOS + ' 个打开过字幕的视频可以导出。</p>') } };
   }
   var mode = /^(both|original|translation)$/.test(param(url, 'mode')) ? param(url, 'mode') : 'both';
   var fmt = param(url, 'fmt');

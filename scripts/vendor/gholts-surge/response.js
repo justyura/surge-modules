@@ -353,10 +353,9 @@ SOFTWARE.
             blockVerticalLive = false,
             blockShorts = false,
             jumpAhead = true,
-            subtitleExport = true,
         } = {},
     ) {
-        let changed = transformMenus(message, subtitleExport);
+        let changed = transformMenus(message);
         const emptied = new WeakSet();
         visitObjects(message, (object) => {
             const layout = object.renderInfo?.layoutRender?.eml?.split("|")[0];
@@ -470,112 +469,18 @@ SOFTWARE.
             }
         return changed;
     }
-    function transformMenus(message, subtitleExport = false) {
+    function transformMenus(message) {
         const overlay = message.playerOverlays?.renderer;
         if (!overlay?.overflowMenu) return false;
-        let changed = false;
         try {
             const menu = unlockSpeedMenu(overlay.overflowMenu);
-            changed = !sameBytes(menu, overlay.overflowMenu);
+            const changed = !sameBytes(menu, overlay.overflowMenu);
             overlay.overflowMenu = menu;
+            return changed;
         } catch (error) {
             console.log("YouTube speed menu: " + error);
+            return false;
         }
-        // get_watch / Onesie 里的 next 可能没有 currentVideoEndpoint；没有视频 ID
-        // 就打开不带 ID 的导出页，页面显示最近打开过字幕的视频
-        const videoId = message.currentVideoEndpoint?.watchEndpoint?.videoId ?? "";
-        // true：新加一项；replace：把「帮助和反馈」改成「导出字幕」（App 不显示新加的项时用）；false：关
-        const exportMode = String(subtitleExport);
-        if (exportMode !== "false") {
-            try {
-                const menu = addSubtitleExportItem(
-                    overlay.overflowMenu,
-                    videoId,
-                    exportMode === "replace",
-                );
-                changed = !sameBytes(menu, overlay.overflowMenu) || changed;
-                overlay.overflowMenu = menu;
-            } catch (error) {
-                console.log("YouTube subtitle export: " + error);
-            }
-        }
-        return changed;
-    }
-    // Local patch: an "export subtitles" item in the player overflow menu. It is
-    // a copy of "help and feedback" whose tap opens a URL that the subtitles
-    // module (scripts/youtube-subtitles.js) answers locally with the subtitles.
-    const EXPORT_URL = "https://yt-subtitles.internal/";
-    const EXPORT_ID = "menu_item_export_subtitles";
-    const EXPORT_STATE = "/youtube/app/player_overflow_menu/" + EXPORT_ID;
-    const MENU_ITEM_MODEL = [153515154, 172660663, 1, 168777401, 5, 407694004];
-    function stringField(no, value) {
-        return encodeField([no, "", "bytes"], textEncoder.encode(value));
-    }
-    function replaceStrings(bytes, path, value) {
-        return rewriteBinaryPath(bytes, path, () => textEncoder.encode(value));
-    }
-    function exportButton(template, videoId) {
-        // Tap → innertubeCommand(169495254) → urlEndpoint(49679253) { url, target: new window }
-        const onTap = encodeField(
-            [169495254, "", "bytes"],
-            encodeField(
-                [49679253, "", "bytes"],
-                concatBytes([
-                    stringField(1, EXPORT_URL + (videoId ? "?v=" + encodeURIComponent(videoId) : "")),
-                    varint(2 * 8),
-                    varint(1),
-                ]),
-            ),
-        );
-        return rewriteBinaryPath(template, [...MENU_ITEM_MODEL, 4], (button) =>
-            concatBytes([
-                ...wireFields(button)
-                    .filter((field) => ![2, 3, 4].includes(field.no))
-                    .map((field) => field.raw),
-                stringField(2, "yt_outline_share_24pt"),
-                stringField(3, "导出字幕"),
-                encodeField([4, "", "bytes"], onTap),
-            ]),
-        );
-    }
-    function exportMenuItem(template, videoId) {
-        let item = exportButton(template, videoId);
-        item = replaceStrings(item, [...MENU_ITEM_MODEL, 10], EXPORT_STATE);
-        item = replaceStrings(item, [153515154, 3, 396644439, 1], EXPORT_ID);
-        item = replaceStrings(
-            item,
-            [153515154, 172660663, 1, 168777401, 6, 188490103, 1, 1],
-            EXPORT_STATE,
-        );
-        return item;
-    }
-    function addSubtitleExportItem(bytes, videoId, replace = false) {
-        const has = (field, marker) =>
-            containsMarker(field.data, textEncoder.encode(marker));
-        return rewriteBinaryPath(bytes, [66439850], (menu) => {
-            const fields = wireFields(menu);
-            const items = fields.filter((field) => field.no === 1 && field.wire === 2);
-            if (items.some((field) => has(field, EXPORT_ID) || has(field, EXPORT_URL))) return menu;
-            const template = items.find((field) => has(field, "menu_item_help_and_feedback"));
-            if (!template) {
-                console.log("YouTube subtitle export: no help item to copy");
-                return menu;
-            }
-            if (replace) {
-                // 标识符、状态 key 都留着「帮助和反馈」的，只换标题、图标和点击后打开的地址
-                const changed = encodeField([1, "", "bytes"], exportButton(template.data, videoId));
-                console.log("YouTube subtitle export: replaced help item" + (videoId ? "" : " (no video id)"));
-                return concatBytes(fields.map((field) => (field === template ? changed : field.raw)));
-            }
-            const anchor =
-                items.find((field) => has(field, "menu_item_captions")) ??
-                items[items.length - 1];
-            const added = encodeField([1, "", "bytes"], exportMenuItem(template.data, videoId));
-            console.log("YouTube subtitle export: added menu item" + (videoId ? "" : " (no video id)"));
-            return concatBytes(
-                fields.flatMap((field) => (field === anchor ? [field.raw, added] : [field.raw])),
-            );
-        });
     }
     function unlockSpeedMenu(bytes) {
         const upsell = textEncoder.encode("PApremium_upsell");
@@ -860,13 +765,10 @@ SOFTWARE.
         ReelShelfRenderer: [[1, "richItemContents", "RichItemContent", true]],
         Next: [
             [7, "content", "NextContent"],
-            [9, "currentVideoEndpoint", "CurrentVideoEndpoint"],
             [8, "onResponseReceivedAction", "BrowseContent"],
             [14, "playerOverlays", "PlayerOverlays"],
             [25, "engagementPanels", "EngagementPanel", true],
         ],
-        CurrentVideoEndpoint: [[48687757, "watchEndpoint", "WatchEndpoint"]],
-        WatchEndpoint: [[1, "videoId", "string"]],
         EngagementPanel: [[138681066, "renderer", "EngagementPanelRenderer"]],
         EngagementPanelRenderer: [[3, "content", "BrowseContent"]],
         NextContent: [[51779735, "nextResult", "NextResult"]],

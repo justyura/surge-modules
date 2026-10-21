@@ -11,7 +11,7 @@
 
 每个目录里的 `LICENSE` 是上游的许可证原文。除了 `gholts-surge/response.js`，脚本内容都没有改过。
 
-`gholts-surge/response.js` 加了三处本地改动，全部在 `gholts-surge/local.patch` 里：隐藏首页和搜索里的 Shorts 栏（`blockShorts` 原本只去掉底部标签），打开视频自动开字幕（`autoCaptions`），以及播放器「更多」菜单里加「导出字幕」（`subtitleExport`，测试是 `tools/test_youtube_menu.js`）。
+`gholts-surge/response.js` 加了两处本地改动，全部在 `gholts-surge/local.patch` 里：隐藏首页和搜索里的 Shorts 栏（`blockShorts` 原本只去掉底部标签），以及打开视频自动开字幕（`autoCaptions`）。
 
 ## 更新
 
