@@ -647,6 +647,8 @@ key 只在 Surge 里用，网页拿不到。在 Safari 里打开 `https://stacko
 
 ### 维护
 
+- 「翻译合集」里的脚本每 10 分钟检查一次更新（`script-update-interval=600`，Surge 默认 24 小时）。改了脚本推上去，手机上最多十几分钟就用上新的（GitHub 的 raw 地址本身还有 5 分钟缓存），不用去「外部资源」里手动更新。
+
 - 几个脚本的大模型代码是同一份：改 `scripts/lib/llm.js`，再跑 `python3 tools/sync_llm.py` 同步进各个脚本（Surge 脚本不能互相引用，只能各放一份）。
 - 改了 `translate.sgmodule`（参数、脚本地址、匹配规则）跑 `node tools/test_translate.js`：检查用到的参数都声明了、每个参数都有说明、传给脚本的字段脚本都认识，顺带检查大模型代码有没有同步。
 - 各站点的测试：`node tools/test_subtitles.js`（含字幕导出）、`test_reddit.js`、`test_x.js`、`test_github.js`、`test_stackoverflow.js`、`test_stackoverflow_web.js`（要装 Playwright），测试面板是 `test_translate_panel.js`。都模拟了 Surge 和大模型 / DeepL / Google 接口，假的大模型在 `tools/fake_llm.js`。
