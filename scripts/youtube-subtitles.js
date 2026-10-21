@@ -38,6 +38,10 @@
  * （评论区走 next，点进某条评论看回复走 browse）。这两个接口的响应已经被「App 去广告合集」
  * 的脚本占了（Surge 一个响应只跑一个脚本），所以在请求阶段认出评论请求，自己去 YouTube
  * 拿评论、翻译好直接当响应返回；其他请求原样放行。key、暂停状态、Google 兜底都和字幕共用。
+ *
+ * 还管字幕导出：处理字幕时把每句的时间、原文、译文记下来（最近 2 个视频）；播放器「更多」菜单里的
+ * 「导出字幕」（「App 去广告合集」加的）打开 https://yt-subtitles.internal/?v=视频ID，这个地址由本脚本
+ * 作为 http-request 脚本直接回应：一个下载页面，和双语 / 原文 / 译文的 SRT、纯文本。不会发到网上。
  */
 
 var STORE_KEY = 'yt-subtitles-deepl';
@@ -49,6 +53,9 @@ var PARALLEL = 3;                // 同时发几个请求
 var CACHE_VIDEOS = 3;            // 缓存最近几个视频的翻译，拖进度条、重开字幕不重复花额度
 var NOTES_PER_CUE = 2;           // 每句字幕最多标几个生词
 var NOTE_CHARS = 10;             // 释义最多几个字
+var EXPORT_STORE_KEY = 'yt-subtitles-export';
+var EXPORT_VIDEOS = 2;           // 记最近几个视频的字幕给导出用
+var EXPORT_HOST = /^https?:\/\/yt-subtitles\.internal\//;
 var COMMENT_STORE_KEY = 'yt-comments-translations';
 var COMMENT_CACHE = 300;         // 缓存最近多少条评论的译文
 var COMMENT_BUDGET = 4;          // 评论最多等几秒翻译，比字幕短，翻不完的先显示原文
@@ -888,6 +895,9 @@ var FORMATS = {
       });
       return doc;
     },
+    times: function (doc) {
+      return doc.events.map(function (e) { return [e.tStartMs || 0, e.dDurationMs || 0]; });
+    },
     parse: function (body) { return JSON.parse(body); },
     stringify: function (doc) { return JSON.stringify(doc); },
   },
@@ -898,6 +908,16 @@ var FORMATS = {
       var out = [];
       body.replace(this.RE, function (m, open, tag, inner) {
         out.push(decodeXml(inner.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')).trim());
+        return m;
+      });
+      return out;
+    },
+    // srv3 是 <p t="毫秒" d="毫秒">，srv1 是 <text start="秒" dur="秒">
+    times: function (body) {
+      var out = [];
+      body.replace(this.RE, function (m, open, tag) {
+        var attr = function (name) { var a = new RegExp('\\b' + name + '="([\\d.]+)"').exec(open); return a ? Number(a[1]) : 0; };
+        out.push(tag === 'p' ? [attr('t'), attr('d')] : [Math.round(attr('start') * 1000), Math.round(attr('dur') * 1000)]);
         return m;
       });
       return out;
@@ -922,6 +942,19 @@ var FORMATS = {
         var lines = block.split('\n');
         var at = lines.findIndex(function (l) { return l.indexOf('-->') !== -1; });
         return at === -1 ? '' : lines.slice(at + 1).join('\n').replace(/<[^>]+>/g, '').trim();
+      });
+    },
+    times: function (body) {
+      var ms = function (t) {
+        var p = t.trim().split(':');
+        return Math.round(p.reduce(function (n, x) { return n * 60 + Number(x); }, 0) * 1000);
+      };
+      return this.blocks(body).map(function (block) {
+        var line = block.split('\n').filter(function (l) { return l.indexOf('-->') !== -1; })[0];
+        if (!line) return null;
+        var parts = line.split('-->');
+        var start = ms(parts[0]);
+        return [start, ms(parts[1].trim().split(/\s+/)[0]) - start];
       });
     },
     apply: function (body, texts, map, notes) {
@@ -1225,6 +1258,106 @@ async function translateCommentTexts(body, video, videoId) {
   return result;
 }
 
+// ---------- 字幕导出 ----------
+
+function loadExports() {
+  try { return JSON.parse($persistentStore.read(EXPORT_STORE_KEY) || '[]'); } catch (e) { return []; }
+}
+
+// 每句存成 [开始毫秒, 时长毫秒, 原文, 译文]
+function remember(url, handler, doc, texts, map) {
+  var v = param(url, 'v');
+  if (!v || !handler.times) return;
+  var times = handler.times(doc);
+  var cues = [];
+  texts.forEach(function (t, i) { if (t && times[i]) cues.push([times[i][0], times[i][1], t, map[t] || '']); });
+  if (!cues.length) return;
+  var list = loadExports().filter(function (e) { return e.v !== v; });
+  list.unshift({ v: v, lang: param(url, 'lang') || param(url, 'tlang'), target: ARGS.target, cues: cues });
+  try { $persistentStore.write(JSON.stringify(list.slice(0, EXPORT_VIDEOS)), EXPORT_STORE_KEY); } catch (e) {}
+}
+
+function srtTime(ms) {
+  var pad = function (n, w) { n = String(n); while (n.length < w) n = '0' + n; return n; };
+  return pad(Math.floor(ms / 3600000), 2) + ':' + pad(Math.floor(ms / 60000) % 60, 2) + ':' + pad(Math.floor(ms / 1000) % 60, 2) + ',' + pad(ms % 1000, 3);
+}
+
+// mode：both 双语、original 原文、translation 译文（没翻好的句子用原文）
+function cueText(cue, mode) {
+  if (mode === 'original' || !cue[3]) return cue[2];
+  return mode === 'translation' ? cue[3] : cue[2] + '\n' + cue[3];
+}
+
+// 自动生成字幕的每句会和下一句重叠，结束时间截到下一句开始
+function toSrt(cues, mode) {
+  return cues.map(function (cue, i) {
+    var next = cues[i + 1];
+    var end = cue[0] + (cue[1] || 2000);
+    if (next && next[0] > cue[0] && end > next[0]) end = next[0];
+    return (i + 1) + '\n' + srtTime(cue[0]) + ' --> ' + srtTime(end) + '\n' + cueText(cue, mode);
+  }).join('\n\n') + '\n';
+}
+
+function toText(cues, mode) {
+  return cues.map(function (cue) { return cueText(cue, mode); }).join(mode === 'both' ? '\n\n' : '\n') + '\n';
+}
+
+function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+function page(title, inner) {
+  return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<title>' + escapeHtml(title) + '</title><style>'
+    + ':root{color-scheme:light dark;--bg:#fff;--fg:#111;--muted:#666;--card:#f2f2f2;--accent:#c00}'
+    + '@media (prefers-color-scheme:dark){:root{--bg:#111;--fg:#eee;--muted:#999;--card:#222;--accent:#f55}}'
+    + 'body{margin:0;padding:20px 16px;background:var(--bg);color:var(--fg);font:16px/1.5 -apple-system,system-ui,sans-serif}'
+    + 'h1{font-size:20px;margin:0 0 4px}p{color:var(--muted);margin:0 0 16px}'
+    + 'a.b,button{display:block;width:100%;box-sizing:border-box;margin:0 0 10px;padding:12px;border:0;border-radius:10px;background:var(--card);color:var(--fg);font:inherit;text-align:center;text-decoration:none}'
+    + 'a.b.main{background:var(--accent);color:#fff}pre{white-space:pre-wrap;background:var(--card);padding:12px;border-radius:10px;font-size:14px}'
+    + '</style></head><body>' + inner + '</body></html>';
+}
+
+function exportMain() {
+  var url = $request.url;
+  var v = param(url, 'v');
+  var entry = loadExports().filter(function (e) { return e.v === v; })[0];
+  var html = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };
+  if (!entry) {
+    return { response: { status: 200, headers: html, body: page('导出字幕', '<h1>还没有这个视频的字幕</h1>'
+      + '<p>先在播放器里打开字幕，等字幕显示出来（双语的话等译文出来），再点「导出字幕」。最近 ' + EXPORT_VIDEOS + ' 个打开过字幕的视频可以导出。</p>') } };
+  }
+  var mode = /^(both|original|translation)$/.test(param(url, 'mode')) ? param(url, 'mode') : 'both';
+  var fmt = param(url, 'fmt');
+  var name = entry.v + '.' + (entry.lang || 'sub') + (mode === 'both' ? '.' + entry.target.toLowerCase() : mode === 'translation' ? '.' + entry.target.toLowerCase() + '-only' : '');
+  if (fmt === 'srt') {
+    return { response: { status: 200, headers: {
+      'Content-Type': 'application/x-subrip; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="' + name + '.srt"',
+      'Cache-Control': 'no-store',
+    }, body: toSrt(entry.cues, mode) } };
+  }
+  if (fmt === 'txt') {
+    return { response: { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }, body: toText(entry.cues, mode) } };
+  }
+  var translated = entry.cues.filter(function (c) { return c[3]; }).length;
+  var link = function (m, f, label, cls) {
+    return '<a class="b' + (cls ? ' ' + cls : '') + '" href="/?v=' + encodeURIComponent(entry.v) + '&mode=' + m + '&fmt=' + f + '">' + label + '</a>';
+  };
+  var buttons = translated
+    ? link('both', 'srt', '下载双语 SRT', 'main') + link('original', 'srt', '下载原文 SRT') + link('translation', 'srt', '下载译文 SRT')
+      + link('both', 'txt', '查看双语纯文本') + link('original', 'txt', '查看原文纯文本')
+    : link('original', 'srt', '下载 SRT', 'main') + link('original', 'txt', '查看纯文本');
+  var preview = entry.cues.slice(0, 6).map(function (c) { return escapeHtml(cueText(c, 'both')); }).join('\n\n');
+  var all = JSON.stringify(toText(entry.cues, translated ? 'both' : 'original')).replace(/</g, '\\u003c');
+  return { response: { status: 200, headers: html, body: page('导出字幕', '<h1>导出字幕</h1>'
+    + '<p>视频 ' + escapeHtml(entry.v) + ' · ' + escapeHtml(entry.lang || '未知语言') + ' · ' + entry.cues.length + ' 句'
+    + (translated ? '，译文 ' + translated + ' 句' : '，没有译文') + '</p>'
+    + buttons
+    + '<button id="copy">复制全部文字</button>'
+    + '<pre>' + preview + (entry.cues.length > 6 ? '\n\n…' : '') + '</pre>'
+    + '<script>var all=' + all + ';document.getElementById("copy").onclick=function(){var b=this;'
+    + 'navigator.clipboard.writeText(all).then(function(){b.textContent="已复制"},function(){b.textContent="复制失败，用上面的「查看纯文本」"})}</script>') } };
+}
+
 // ---------- 主流程 ----------
 
 function main() {
@@ -1234,18 +1367,21 @@ function main() {
   log(url);
 
   if (!body || typeof body !== 'string') return Promise.resolve(null);
-  if (param(url, 'tlang')) { log('YouTube 自带翻译字幕，跳过'); return Promise.resolve(null); }
-  if (lang && lang.split('-')[0] === ARGS.target.split('-')[0].toLowerCase()) { log('已经是目标语言，跳过'); return Promise.resolve(null); }
-  var wantVocab = !!ARGS.vocab && (!lang || lang.split('-')[0] === 'en');
-  var useLlm = ARGS.llmKeyList.length > 0;
-  var canTranslate = canTranslateAny();
-  if (!canTranslate && !wantVocab) { log('没有可用的 DeepL key'); return Promise.resolve(null); }
-
   var format = detect(url, body);
   if (!format) { log('不认识的字幕格式'); return Promise.resolve(null); }
   var handler = FORMATS[format];
   var doc = handler.parse(body);
   var texts = handler.texts(doc);
+  // 不翻译的字幕也记下来，导出时用
+  function skip(reason) { log(reason); remember(url, handler, doc, texts, {}); return Promise.resolve(null); }
+
+  if (param(url, 'tlang')) return skip('YouTube 自带翻译字幕，跳过');
+  if (lang && lang.split('-')[0] === ARGS.target.split('-')[0].toLowerCase()) return skip('已经是目标语言，跳过');
+  var wantVocab = !!ARGS.vocab && (!lang || lang.split('-')[0] === 'en');
+  var useLlm = ARGS.llmKeyList.length > 0;
+  var canTranslate = canTranslateAny();
+  if (!canTranslate && !wantVocab) return skip('没有可用的 DeepL key');
+
   var seen = {};
   var unique = texts.filter(function (t) { if (!t || seen[t]) return false; seen[t] = true; return true; });
   if (!unique.length) return Promise.resolve(null);
@@ -1276,6 +1412,7 @@ function main() {
     state.cache.unshift(saved);
     state.cache = state.cache.slice(0, CACHE_VIDEOS);
     saveState(state);
+    remember(url, handler, doc, texts, map);
     var notes = placeNotes(texts, list);
     log('生词 ' + (list ? list.length : '-') + ' 个，标在 ' + Object.keys(notes).length + ' 句下面');
     if (!Object.keys(map).length && !Object.keys(notes).length) { log('没有拿到任何翻译，保持原字幕'); return null; }
@@ -1283,7 +1420,9 @@ function main() {
   });
 }
 
-var COMMENTS = typeof $response === 'undefined';
+// 三种用法：字幕响应、导出页面（请求 yt-subtitles.internal）、评论请求
+var EXPORT = typeof $response === 'undefined' && EXPORT_HOST.test($request.url);
+var COMMENTS = typeof $response === 'undefined' && !EXPORT;
 var finished = false;
 var guard = null;
 function finish(out) {
@@ -1300,7 +1439,7 @@ function arm(seconds) {
 }
 arm(COMMENTS ? COMMENT_FETCH_TIMEOUT + 2 : ARGS.budget + 3);
 
-(COMMENTS ? commentsMain() : main()).then(finish, function (error) {
+(EXPORT ? Promise.resolve(exportMain()) : COMMENTS ? commentsMain() : main()).then(finish, function (error) {
   log('出错：' + (error && error.message));
   finish(COMMENTS ? commentFallback : null);
 });

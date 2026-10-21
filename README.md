@@ -145,12 +145,13 @@ https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule
 
 哔哩哔哩有几个参数可以调：动态最常访问、创作中心、过滤置顶评论广告、日志等级，在模块参数里改。
 
-YouTube 有四个开关，默认都是 `true`，不想要就改成 `false`：
+YouTube 有五个开关，默认都是 `true`，不想要就改成 `false`：
 
 - `YouTube隐藏Shorts`：底部的 Shorts 标签，首页、搜索、播放页推荐里的 Shorts 栏
 - `YouTube隐藏游戏`：首页里的 Playables 小游戏
 - `YouTube隐藏竖屏直播`：推荐里的竖屏直播
 - `YouTube自动字幕`：打开视频就自动开字幕。视频有原语言的人工字幕就用它，没有就用自动生成的。和「翻译合集」一起装，打开视频直接是双语
+- `YouTube字幕导出`：播放器右上角「更多」菜单里，「字幕」下面加一项「导出字幕」。要和「翻译合集」一起装，用法见「YouTube 字幕导出」一节
 
 自动字幕是改的 YouTube 返回的「这个视频默认开不开字幕」，和 YouTube 给日语用户看英文视频时自动开日文字幕是同一个开关。你在某个视频里手动关了字幕，App 会记住，之后可能不再自动开，到播放器里再打开一次就好。
 
@@ -433,6 +434,19 @@ GitHub 和 Stack Overflow 发过去的是简单 HTML，提示词里要求 `<code
 - 服务最多等 4 秒，连不上就只显示翻译，不影响字幕。同一个视频的生词会缓存。
 - 手机要能连到这个地址：在家用局域网 IP；在外面要么把服务放到公网（建议加 HTTPS），要么在 Surge 里配 WireGuard 连回家。iPhone 同时只能开一个 VPN，Surge 开着时 Tailscale 用不了。
 
+### YouTube 字幕导出
+
+播放器右上角「更多」菜单里有一项「导出字幕」（「App 去广告合集」的 `YouTube字幕导出` 开关加的，两个模块都要装，「YouTube字幕」也要开着）。点了会打开一个页面：
+
+- 下载双语 SRT、原文 SRT、译文 SRT，或者查看纯文本、一键复制全部文字
+- 字幕就是你正在看的那一份：字幕脚本处理字幕时，把每句的时间、原文、译文记下来，记最近 2 个视频
+- 要先打开字幕，等译文出来再导出。没翻完的句子在译文里用原文顶上，关掉字幕再打开会接着翻，翻完再导出就是全的
+- 自动生成的字幕每句会和下一句重叠，导出时结束时间截到下一句开始
+
+页面地址是 `https://yt-subtitles.internal/?v=视频ID`，由 Surge 里的脚本直接回应，不会发到网上，所以要开 MITM（模块已经加好了）。
+
+菜单是服务器下发给 App 的（protobuf），「导出字幕」是照着「帮助和反馈」复制一份，改了标题、图标和点击后打开的地址。YouTube 改了菜单格式的话，这一项不会出现，不影响别的。
+
 ### YouTube 评论
 
 打开评论区，外文评论的译文直接接在原文下面，往下翻、点进去看回复也一样。默认开着，参数「YouTube评论」填 `#` 关掉。
@@ -597,7 +611,7 @@ key 只在 Surge 里用，网页拿不到。在 Safari 里打开 `https://stacko
 
 - 几个脚本的大模型代码是同一份：改 `scripts/lib/llm.js`，再跑 `python3 tools/sync_llm.py` 同步进各个脚本（Surge 脚本不能互相引用，只能各放一份）。
 - 改了 `translate.sgmodule`（参数、脚本地址、匹配规则）跑 `node tools/test_translate.js`：检查用到的参数都声明了、每个参数都有说明、传给脚本的字段脚本都认识，顺带检查大模型代码有没有同步。
-- 各站点的测试：`node tools/test_subtitles.js`、`test_reddit.js`、`test_x.js`、`test_github.js`、`test_stackoverflow.js`、`test_stackoverflow_web.js`（要装 Playwright），测试面板是 `test_translate_panel.js`。都模拟了 Surge 和大模型 / DeepL / Google 接口，假的大模型在 `tools/fake_llm.js`。
+- 各站点的测试：`node tools/test_subtitles.js`（含字幕导出）、`test_youtube_menu.js`（播放器菜单里的「导出字幕」）、`test_reddit.js`、`test_x.js`、`test_github.js`、`test_stackoverflow.js`、`test_stackoverflow_web.js`（要装 Playwright），测试面板是 `test_translate_panel.js`。都模拟了 Surge 和大模型 / DeepL / Google 接口，假的大模型在 `tools/fake_llm.js`。
 
 ## 规矩
 

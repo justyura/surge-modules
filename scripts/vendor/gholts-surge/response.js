@@ -353,9 +353,10 @@ SOFTWARE.
             blockVerticalLive = false,
             blockShorts = false,
             jumpAhead = true,
+            subtitleExport = false,
         } = {},
     ) {
-        let changed = transformMenus(message);
+        let changed = transformMenus(message, subtitleExport);
         const emptied = new WeakSet();
         visitObjects(message, (object) => {
             const layout = object.renderInfo?.layoutRender?.eml?.split("|")[0];
@@ -469,18 +470,91 @@ SOFTWARE.
             }
         return changed;
     }
-    function transformMenus(message) {
+    function transformMenus(message, subtitleExport = false) {
         const overlay = message.playerOverlays?.renderer;
         if (!overlay?.overflowMenu) return false;
+        let changed = false;
         try {
             const menu = unlockSpeedMenu(overlay.overflowMenu);
-            const changed = !sameBytes(menu, overlay.overflowMenu);
+            changed = !sameBytes(menu, overlay.overflowMenu);
             overlay.overflowMenu = menu;
-            return changed;
         } catch (error) {
             console.log("YouTube speed menu: " + error);
-            return false;
         }
+        const videoId = message.currentVideoEndpoint?.watchEndpoint?.videoId;
+        if (subtitleExport && videoId) {
+            try {
+                const menu = addSubtitleExportItem(overlay.overflowMenu, videoId);
+                changed = !sameBytes(menu, overlay.overflowMenu) || changed;
+                overlay.overflowMenu = menu;
+            } catch (error) {
+                console.log("YouTube subtitle export: " + error);
+            }
+        }
+        return changed;
+    }
+    // Local patch: an "export subtitles" item in the player overflow menu. It is
+    // a copy of "help and feedback" whose tap opens a URL that the subtitles
+    // module (scripts/youtube-subtitles.js) answers locally with the subtitles.
+    const EXPORT_URL = "https://yt-subtitles.internal/?v=";
+    const EXPORT_ID = "menu_item_export_subtitles";
+    const EXPORT_STATE = "/youtube/app/player_overflow_menu/" + EXPORT_ID;
+    const MENU_ITEM_MODEL = [153515154, 172660663, 1, 168777401, 5, 407694004];
+    function stringField(no, value) {
+        return encodeField([no, "", "bytes"], textEncoder.encode(value));
+    }
+    function replaceStrings(bytes, path, value) {
+        return rewriteBinaryPath(bytes, path, () => textEncoder.encode(value));
+    }
+    function exportMenuItem(template, videoId) {
+        // Tap → innertubeCommand(169495254) → urlEndpoint(49679253) { url, target: new window }
+        const onTap = encodeField(
+            [169495254, "", "bytes"],
+            encodeField(
+                [49679253, "", "bytes"],
+                concatBytes([
+                    stringField(1, EXPORT_URL + encodeURIComponent(videoId)),
+                    varint(2 * 8),
+                    varint(1),
+                ]),
+            ),
+        );
+        let item = rewriteBinaryPath(template, [...MENU_ITEM_MODEL, 4], (button) =>
+            concatBytes([
+                ...wireFields(button)
+                    .filter((field) => ![2, 3, 4].includes(field.no))
+                    .map((field) => field.raw),
+                stringField(2, "yt_outline_share_24pt"),
+                stringField(3, "导出字幕"),
+                encodeField([4, "", "bytes"], onTap),
+            ]),
+        );
+        item = replaceStrings(item, [...MENU_ITEM_MODEL, 10], EXPORT_STATE);
+        item = replaceStrings(item, [153515154, 3, 396644439, 1], EXPORT_ID);
+        item = replaceStrings(
+            item,
+            [153515154, 172660663, 1, 168777401, 6, 188490103, 1, 1],
+            EXPORT_STATE,
+        );
+        return item;
+    }
+    function addSubtitleExportItem(bytes, videoId) {
+        const has = (field, marker) =>
+            containsMarker(field.data, textEncoder.encode(marker));
+        return rewriteBinaryPath(bytes, [66439850], (menu) => {
+            const fields = wireFields(menu);
+            const items = fields.filter((field) => field.no === 1 && field.wire === 2);
+            if (items.some((field) => has(field, EXPORT_ID))) return menu;
+            const template = items.find((field) => has(field, "menu_item_help_and_feedback"));
+            if (!template) return menu;
+            const anchor =
+                items.find((field) => has(field, "menu_item_captions")) ??
+                items[items.length - 1];
+            const added = encodeField([1, "", "bytes"], exportMenuItem(template.data, videoId));
+            return concatBytes(
+                fields.flatMap((field) => (field === anchor ? [field.raw, added] : [field.raw])),
+            );
+        });
     }
     function unlockSpeedMenu(bytes) {
         const upsell = textEncoder.encode("PApremium_upsell");
@@ -765,10 +839,13 @@ SOFTWARE.
         ReelShelfRenderer: [[1, "richItemContents", "RichItemContent", true]],
         Next: [
             [7, "content", "NextContent"],
+            [9, "currentVideoEndpoint", "CurrentVideoEndpoint"],
             [8, "onResponseReceivedAction", "BrowseContent"],
             [14, "playerOverlays", "PlayerOverlays"],
             [25, "engagementPanels", "EngagementPanel", true],
         ],
+        CurrentVideoEndpoint: [[48687757, "watchEndpoint", "WatchEndpoint"]],
+        WatchEndpoint: [[1, "videoId", "string"]],
         EngagementPanel: [[138681066, "renderer", "EngagementPanelRenderer"]],
         EngagementPanelRenderer: [[3, "content", "BrowseContent"]],
         NextContent: [[51779735, "nextResult", "NextResult"]],

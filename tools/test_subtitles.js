@@ -188,6 +188,21 @@ function runComments({ upstream, token = 'Eg0SC2RRdzR3OVdnWGNRGAYyJCIRIgtkUXc0dz
   });
 }
 
+// 导出页面：http-request 脚本，没有 $response
+function runExport(url, store) {
+  return new Promise((resolve) => {
+    const env = {
+      $argument: ARGS(K1),
+      $request: { url, headers: {} },
+      $persistentStore: { read: (k) => store[k] ?? null, write: (v, k) => { store[k] = v; return true; } },
+      $httpClient: { post: () => { throw new Error('导出不该发请求'); }, get: () => { throw new Error('导出不该发请求'); } },
+      $done: (out) => resolve(out.response),
+      console: { log: () => {} },
+    };
+    new Function(...Object.keys(env), CODE)(...Object.values(env));
+  });
+}
+
 const json3 = (lines) => JSON.stringify({ wireMagic: 'pb3', events: lines.map((l, i) => ({ tStartMs: i * 1000, dDurationMs: 1000, segs: [{ utf8: l }] })) });
 const events = (out) => JSON.parse(out.body).events.map((e) => e.segs.map((s) => s.utf8).join(''));
 const URL_EN = 'https://www.youtube.com/api/timedtext?v=vid1&lang=en&fmt=json3';
@@ -656,6 +671,51 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     const c3 = await runComments({ upstream: commentsPb(['Classic tune']), extra: LLM() });
     assert.ok(!('topic' in llmCalls(c3)[0].payload), '没有概要就不带');
     console.log(`ok  视频概要：整条字幕读一遍，${calls.length} 组都带上概要和用得上的术语，只做一次；卡住不等；评论也带视频讲什么`);
+  }
+
+  // 17. 字幕导出：处理字幕时记下时间和译文，导出页面给双语 / 原文 / 译文的 SRT 和纯文本
+  {
+    const r = await run({ url: URL_EN.replace('vid1', 'exp1'), body: json3(['Hello there', 'How are you', 'Hello there']), args: ARGS(K1) });
+    const page = await runExport('https://yt-subtitles.internal/?v=exp1', r.store);
+    assert.strictEqual(page.status, 200);
+    assert.ok(page.headers['Content-Type'].startsWith('text/html'));
+    assert.ok(page.body.includes('3 句，译文 3 句') && page.body.includes('下载双语 SRT') && page.body.includes('mode=original&fmt=srt'), page.body);
+    const srt = await runExport('https://yt-subtitles.internal/?v=exp1&mode=both&fmt=srt', r.store);
+    assert.strictEqual(srt.headers['Content-Disposition'], 'attachment; filename="exp1.en.zh-hans.srt"');
+    assert.strictEqual(srt.body, '1\n00:00:00,000 --> 00:00:01,000\nHello there\n译:Hello there\n\n2\n00:00:01,000 --> 00:00:02,000\nHow are you\n译:How are you\n\n3\n00:00:02,000 --> 00:00:03,000\nHello there\n译:Hello there\n');
+    const orig = await runExport('https://yt-subtitles.internal/?v=exp1&mode=original&fmt=srt', r.store);
+    assert.ok(orig.body.startsWith('1\n00:00:00,000 --> 00:00:01,000\nHello there\n\n2'));
+    const tr = await runExport('https://yt-subtitles.internal/?v=exp1&mode=translation&fmt=txt', r.store);
+    assert.strictEqual(tr.body, '译:Hello there\n译:How are you\n译:Hello there\n');
+    assert.ok(tr.headers['Content-Type'].startsWith('text/plain'));
+
+    // 没打开过字幕的视频：提示先打开字幕
+    const none = await runExport('https://yt-subtitles.internal/?v=nope', r.store);
+    assert.ok(none.body.includes('还没有这个视频的字幕'));
+
+    // 只记最近 2 个视频；中文字幕（跳过翻译）也能导出原文
+    const r2 = await run({ url: URL_EN.replace('vid1', 'exp2').replace('lang=en', 'lang=zh-Hans'), body: json3(['你好']), args: ARGS(K1), store: r.store });
+    const r3 = await run({ url: URL_EN.replace('vid1', 'exp3'), body: json3(['Third']), args: ARGS(K1), store: r2.store });
+    assert.ok((await runExport('https://yt-subtitles.internal/?v=exp1', r3.store)).body.includes('还没有'));
+    const zh = await runExport('https://yt-subtitles.internal/?v=exp2', r3.store);
+    assert.ok(zh.body.includes('没有译文') && zh.body.includes('下载 SRT'));
+    assert.strictEqual((await runExport('https://yt-subtitles.internal/?v=exp2&mode=original&fmt=txt', r3.store)).body, '你好\n');
+    console.log('ok  字幕导出：双语 / 原文 / 译文 SRT 和纯文本，没打开过字幕有提示，只记最近 2 个视频，中文字幕也能导出');
+  }
+
+  // 18. 导出的时间轴：srv3（毫秒）、srv1（秒）、WebVTT；自动字幕重叠的结束时间截到下一句
+  {
+    const store = {};
+    const srv3 = '<timedtext format="3"><body><p t="1500" d="2000">One</p><p t="3000" d="1000">Two</p></body></timedtext>';
+    await run({ url: 'https://www.youtube.com/api/timedtext?v=t1&lang=en&fmt=srv3', body: srv3, args: ARGS(K1), store });
+    assert.ok((await runExport('https://yt-subtitles.internal/?v=t1&mode=original&fmt=srt', store)).body.startsWith('1\n00:00:01,500 --> 00:00:03,000\nOne\n\n2\n00:00:03,000 --> 00:00:04,000\nTwo'), '重叠截到下一句开始');
+    const srv1 = '<transcript><text start="3661.25" dur="1.5">Late line</text></transcript>';
+    await run({ url: 'https://www.youtube.com/api/timedtext?v=t2&lang=en', body: srv1, args: ARGS(K1), store });
+    assert.ok((await runExport('https://yt-subtitles.internal/?v=t2&mode=original&fmt=srt', store)).body.startsWith('1\n01:01:01,250 --> 01:01:02,750\nLate line'));
+    const vtt = 'WEBVTT\n\n00:00:05.000 --> 00:00:06.500 align:start\nFive';
+    await run({ url: 'https://www.youtube.com/api/timedtext?v=t3&lang=en&fmt=vtt', body: vtt, args: ARGS(K1), store });
+    assert.ok((await runExport('https://yt-subtitles.internal/?v=t3&mode=original&fmt=srt', store)).body.startsWith('1\n00:00:05,000 --> 00:00:06,500\nFive'));
+    console.log('ok  导出的时间轴：srv3、srv1、WebVTT 都对，重叠的截到下一句');
   }
 
   console.log('全部通过');
