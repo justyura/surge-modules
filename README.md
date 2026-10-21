@@ -7,6 +7,7 @@
 | 模块 | 作用 | 安装链接 |
 | --- | --- | --- |
 | 代理流量面板 | 在面板里显示剩余流量、已用比例、到期日期和重置时间 | `https://raw.githubusercontent.com/justyura/surge-modules/main/usage-pane.sgmodule` |
+| 订阅流量面板 | 填机场订阅链接，显示剩余流量、已用比例和到期日期 | `https://raw.githubusercontent.com/justyura/surge-modules/main/sub-usage.sgmodule` |
 | AdGuard Home 面板 | 在面板里显示自建 AdGuard Home 的防护状态、24 小时查询和拦截数，可以点一下暂停 / 恢复防护 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adguard-home.sgmodule` |
 | App 去广告合集 | 15 个常用 App 的开屏和 App 内广告，一个模块全包 | `https://raw.githubusercontent.com/justyura/surge-modules/main/adblock.sgmodule` |
 | 网页弹窗和广告拦截 | Safari 里的弹窗、跳转广告、网页广告和跟踪，常用网站上的「打开 App」弹窗 | `https://raw.githubusercontent.com/justyura/surge-modules/main/web-popups.sgmodule` |
@@ -63,6 +64,31 @@
 - 绿色：用了不到 75%
 - 橙色：75% 到 90%
 - 红色：90% 以上，或者请求失败
+
+## 订阅流量面板
+
+```
+https://raw.githubusercontent.com/justyura/surge-modules/main/sub-usage.sgmodule
+```
+
+机场的订阅链接（Surge / Clash 用的那个）返回时，响应头里带着 `subscription-userinfo: upload=…; download=…; total=…; expire=…`。这个面板只读这一行，订阅内容本身不看、不改你的配置。
+
+1. 装模块，在参数「订阅链接」里填订阅地址，「名称」是面板标题（订阅自己返回了名字就用它）。
+2. 首页的面板点一下刷新，之后每小时自动更新。
+
+显示出来大概是这样：
+
+```
+剩余 62.29 GiB / 100.00 GiB
+已用 37.71 GiB · 37.7%（上传 20.49 · 下载 17.21）
+到期 2026-11-01 · 12 天
+更新 21:57
+```
+
+- 颜色：用了 75% 以上橙色，90% 以上红色；一周内到期也是橙色。
+- 订阅链接只存在本机的模块参数里，不进仓库。请求时带 `Surge iOS` 的 UA，有的机场只给代理客户端返回流量信息。
+- 和「代理流量面板」用的是同一个脚本 `usage-pane.js`，可以同时装：那个填流量查询接口（JSON），这个填订阅链接。
+- 测试：`node tools/test_usage_pane.js`。
 
 ## AdGuard Home 面板
 

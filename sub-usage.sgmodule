@@ -1,0 +1,14 @@
+#!name=订阅流量面板
+#!desc=读机场订阅链接返回的 subscription-userinfo，显示剩余流量、已用比例和到期日期
+#!system=ios
+#!arguments=订阅链接:"填你的机场订阅链接",名称:订阅流量
+#!arguments-desc=订阅链接\n机场给的订阅地址（Surge / Clash 用的那个），只读响应头里的流量信息，不改你的配置\n\n名称\n面板标题。订阅自己返回了名字（profile-title）就用它
+
+# 脚本：usage-pane.js（和「代理流量面板」同一个脚本，有 subscription-userinfo 响应头时按订阅显示）
+# 订阅链接只存在本机的模块参数里，不进仓库
+
+[Panel]
+SubUsage = title="订阅流量",content="点一下刷新",style=info,script-name=sub-usage-panel,update-interval=3600
+
+[Script]
+sub-usage-panel = type=generic,timeout=15,script-path=https://raw.githubusercontent.com/justyura/surge-modules/main/usage-pane.js,script-update-interval=3600,argument="name={{{名称}}}&url={{{订阅链接}}}"
