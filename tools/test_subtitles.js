@@ -828,8 +828,8 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     console.log('ok  评论只用 DeepL 时也带视频标题当上下文');
   }
 
-  // 17h. 原文和 Claude：复制原文是合成段落的英文；在 Claude 中打开用 claude://claude.ai/new?q=，链接里只带提示词和视频标题
-  // （Claude 会把长文字整段变成文件，提示词混在里面就看不见），原文放剪贴板粘贴成附件；都不用翻译
+  // 17h. 原文和 Claude：Claude App 只收链接里 q 的前 120 个字左右，所以链接里只带一句短话；
+  // 完整内容（你的提示词 + 视频标题 + 原文）给剪贴板，粘贴后长的变成附件；复制原文只有原文；都不用翻译
   {
     const store = {};
     const lines = Array.from({ length: 30 }, (_, i) => `talking point ${i} goes here`);
@@ -837,29 +837,23 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     const original = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=original', store);
     assert.ok(original.headers['Content-Type'].startsWith('text/plain'));
     assert.strictEqual(original.body.replace(/\n\n/g, ' ').trim(), lines.join(' '), '原文就是全部字幕，合成段落');
-    for (const fmt of ['paste', 'prompt']) {
-      assert.strictEqual((await runExport(`https://yt-subtitles.internal/?v=vid1&fmt=${fmt}`, store)).body, original.body, `?fmt=${fmt}：快捷指令放剪贴板的是原文`);
-    }
     const link = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=claudeurl', store);
+    const hint = decodeURIComponent(link.body.slice('claude://claude.ai/new?q='.length));
     assert.ok(link.body.startsWith('claude://claude.ai/new?q='));
-    const prompt = decodeURIComponent(link.body.slice('claude://claude.ai/new?q='.length));
-    assert.ok(prompt.startsWith('Below is a full transcript of a video. Give me a detailed summary in Chinese'), prompt.slice(0, 80));
-    assert.ok(prompt.includes('5. Anything the speaker says is important') && prompt.includes('completeness matters more than brevity.'));
-    assert.ok(prompt.endsWith('Transcript:\nVideo title: Fixing a squeaky door — Handy Dan\n(The full transcript is in the attached file.)'), prompt.slice(-120));
-    assert.ok(!prompt.includes('talking point') && !prompt.includes('[paste here]'), '链接里不带原文');
+    assert.strictEqual(hint, 'Follow the instructions at the top of the text I paste below.');
+    assert.ok(hint.length < 100, 'Claude 只收前 120 个字左右');
+    for (const fmt of ['paste', 'prompt']) {
+      const full = (await runExport(`https://yt-subtitles.internal/?v=vid1&fmt=${fmt}`, store)).body;
+      assert.ok(full.startsWith('Below is a full transcript of a video. Give me a detailed summary in Chinese that captures the key points — not a short overview.'), full.slice(0, 80));
+      assert.ok(full.includes('5. Anything the speaker says is important') && full.includes('completeness matters more than brevity.'));
+      assert.ok(full.endsWith('Transcript:\nVideo title: Fixing a squeaky door — Handy Dan\n\n' + original.body.trim()), `?fmt=${fmt}：提示词 + 标题 + 原文`);
+      assert.ok(!full.includes('[paste here]'));
+    }
     const page = await runExport('https://yt-subtitles.internal/?v=vid1', store);
     assert.ok(page.body.includes('在 Claude 中打开原文') && page.body.includes('复制原文') && page.body.includes(JSON.stringify(link.body)));
-    assert.ok(page.body.includes('copy("claude",original,'), '按钮先复制原文再打开 Claude');
+    assert.ok(page.body.includes('copy("claude",prompt,') && page.body.includes('Below is a full transcript'), '按钮复制的是完整内容');
     for (const r of [original, link, page]) assert.ok(!r.calls.some((c) => c.vendor === 'deepl' || c.vendor === 'google'), '不用翻译');
-
-    // 很长的视频：链接还是只带提示词，原文照样能取
-    const longStore = {};
-    const many = Array.from({ length: 4000 }, (_, i) => `a fairly long line of speech number ${i}`);
-    await run({ url: URL_EN.replace('vid1', 'long1'), body: json3(many), args: ARGS('', '&fallback=off'), store: longStore });
-    const longLink = await runExport('https://yt-subtitles.internal/?v=long1&fmt=claudeurl', longStore);
-    assert.ok(longLink.body.length < 3000 && decodeURIComponent(longLink.body).includes('(The full transcript is in the attached file.)'));
-    assert.ok((await runExport('https://yt-subtitles.internal/?v=long1&fmt=paste', longStore)).body.includes('a fairly long line of speech number 3999'));
-    console.log('ok  在 Claude 中打开：链接只带提示词和标题，原文放剪贴板粘贴成附件；复制原文、快捷指令的地址直接返回文字');
+    console.log('ok  在 Claude 中打开：链接只带一句短话，你的提示词 + 标题 + 原文放剪贴板；复制原文只有原文');
   }
 
   // 17i. 记下实际用了哪个翻译，给「翻译状态」面板看：DeepL 额度用完转 Google 也记清楚；全走缓存不记

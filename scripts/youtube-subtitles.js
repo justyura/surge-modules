@@ -1539,16 +1539,18 @@ var CLAUDE_PROMPT = [
   '[paste here]',
 ].join('\n');
 
-// 链接里只带提示词：Claude App 会把长文字整段变成文件附件，提示词混在里面就看不见了。
-// 原文放剪贴板（?fmt=original，快捷指令用的 ?fmt=prompt / ?fmt=paste 也是它），粘贴后自动变成附件
-function claudeQuery(title) {
-  var note = (title ? 'Video title: ' + title + '\n' : '') + '(The full transcript is in the attached file.)';
-  return CLAUDE_PROMPT.replace('[paste here]', function () { return note; });
+// Claude App 只收链接里 q 的前 120 个字左右（实测在第 119 个字截断），提示词放不进去。
+// 所以链接里只带一句短话，完整内容（提示词 + 视频标题 + 原文）放剪贴板，粘贴后长的会变成附件，提示词在附件开头
+var CLAUDE_HINT = 'Follow the instructions at the top of the text I paste below.';
+
+function claudePrompt(title, text) {
+  var body = (title ? 'Video title: ' + title + '\n\n' : '') + text.trim();
+  return CLAUDE_PROMPT.replace('[paste here]', function () { return body; });
 }
 
-// 在 Claude App 里开一个新对话，输入框里填好提示词（claude://claude.ai/new?q=，非官方但能用）
-function claudeUrl(title) {
-  return 'claude://claude.ai/new?q=' + encodeURIComponent(claudeQuery(title));
+// 在 Claude App 里开一个新对话，输入框里填好那句短话（claude://claude.ai/new?q=，非官方但能用）
+function claudeUrl() {
+  return 'claude://claude.ai/new?q=' + encodeURIComponent(CLAUDE_HINT);
 }
 
 async function exportMain() {
@@ -1585,11 +1587,11 @@ async function exportMain() {
   var plain = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' };
   // 给快捷指令用：原文纯文本、打开 Claude 的链接
   if (fmt === 'original') return { response: { status: 200, headers: plain, body: originalText(entry) } };
-  // 给快捷指令：剪贴板里放原文（paste；prompt 是以前的名字，照样认），再打开带提示词的 Claude 链接
-  if (fmt === 'paste' || fmt === 'prompt') return { response: { status: 200, headers: plain, body: originalText(entry) } };
-  if (fmt === 'claudeurl') {
-    return { response: { status: 200, headers: plain, body: claudeUrl(entry.v === 'latest' ? '' : await videoInfo(entry.v)) } };
+  // 给快捷指令：剪贴板里放完整内容（提示词 + 标题 + 原文；paste 和 prompt 一样），再打开 Claude
+  if (fmt === 'paste' || fmt === 'prompt') {
+    return { response: { status: 200, headers: plain, body: claudePrompt(entry.v === 'latest' ? '' : await videoInfo(entry.v), originalText(entry)) } };
   }
+  if (fmt === 'claudeurl') return { response: { status: 200, headers: plain, body: claudeUrl() } };
   if (fmt === 'srt') {
     return { response: { status: 200, headers: {
       'Content-Type': 'application/x-subrip; charset=utf-8',
@@ -1633,7 +1635,8 @@ async function exportMain() {
   var preview = entry.cues.slice(0, 6).map(function (c) { return escapeHtml(cueText(c, 'both')); }).join('\n\n');
   var json = function (value) { return JSON.stringify(value).replace(/</g, '\\u003c'); };
   var original = originalText(entry);
-  var claude = claudeUrl(entry.v === 'latest' ? '' : await videoInfo(entry.v));
+  var claude = claudeUrl();
+  var prompt = claudePrompt(entry.v === 'latest' ? '' : await videoInfo(entry.v), original);
   return { response: { status: 200, headers: html, body: page('导出字幕', '<h1>导出字幕</h1>'
     + '<p>视频 ' + escapeHtml(entry.v) + ' · ' + escapeHtml(entry.lang || '未知语言') + ' · ' + entry.cues.length + ' 句'
     + (translated ? '，译文 ' + translated + ' 句' : '，没有译文') + '</p>'
@@ -1643,11 +1646,11 @@ async function exportMain() {
     + buttons
     + '<button id="copy">复制双语文字</button>'
     + '<pre>' + preview + (entry.cues.length > 6 ? '\n\n…' : '') + '</pre>'
-    + '<script>var original=' + json(original) + ',all=' + json(toText(entry.cues, translated ? 'both' : 'original')) + ',claude=' + json(claude) + ';'
+    + '<script>var original=' + json(original) + ',all=' + json(toText(entry.cues, translated ? 'both' : 'original')) + ',claude=' + json(claude) + ',prompt=' + json(prompt) + ';'
     + 'function copy(id,text,done){document.getElementById(id).onclick=function(){var b=this;'
     + 'navigator.clipboard.writeText(text).then(function(){done?done():b.textContent="已复制"},function(){done?done():b.textContent="复制失败，用「查看纯文本」"})}}'
-    // 先把原文放进剪贴板，再打开填好提示词的 Claude，长按粘贴原文（长的会变成附件）
-    + 'copy("claude",original,function(){location.href=claude});copy("orig",original);copy("copy",all);</script>') } };
+    // 先把提示词 + 原文放进剪贴板，再打开 Claude，长按粘贴（长的会变成附件）
+    + 'copy("claude",prompt,function(){location.href=claude});copy("orig",original);copy("copy",all);</script>') } };
 }
 
 // ---------- 主流程 ----------
