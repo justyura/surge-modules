@@ -844,8 +844,11 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     assert.ok(prompt.includes('5. Anything the speaker says is important') && prompt.includes('completeness matters more than brevity.'));
     assert.ok(prompt.endsWith('Transcript:\nVideo title: Fixing a squeaky door — Handy Dan\n\n' + original.body.trim()), '原文放在 Transcript: 后面，前面一行视频标题');
     assert.ok(!prompt.includes('[paste here]'));
+    const full = await runExport('https://yt-subtitles.internal/?v=vid1&fmt=prompt', store);
+    assert.strictEqual(full.body, prompt, '剪贴板用的完整内容和链接里的一样：提示词 + 原文');
     const page = await runExport('https://yt-subtitles.internal/?v=vid1', store);
     assert.ok(page.body.includes('在 Claude 中打开原文') && page.body.includes('复制原文') && page.body.includes(JSON.stringify(link.body)));
+    assert.ok(page.body.includes('copy("claude",prompt,'), '按钮复制的是提示词 + 原文');
     for (const r of [original, link, page]) assert.ok(!r.calls.some((c) => c.vendor === 'deepl' || c.vendor === 'google'), '不用翻译');
 
     // 很长的视频：链接里只放提示
@@ -853,8 +856,9 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     const many = Array.from({ length: 4000 }, (_, i) => `a fairly long line of speech number ${i}`);
     await run({ url: URL_EN.replace('vid1', 'long1'), body: json3(many), args: ARGS('', '&fallback=off'), store: longStore });
     const longLink = await runExport('https://yt-subtitles.internal/?v=long1&fmt=claudeurl', longStore);
-    const longPrompt = decodeURIComponent(longLink.body.slice('claude://claude.ai/new?q='.length));
-    assert.ok(longLink.body.length < 3000 && longPrompt.startsWith('Below is a full transcript') && longPrompt.endsWith('已经复制到剪贴板：删掉这一行，长按粘贴）'), '太长：提示词照样填，原文靠剪贴板');
+    assert.strictEqual(longLink.body, 'claude://claude.ai/new', '太长：只打开新对话，粘贴剪贴板里的完整内容');
+    const longFull = await runExport('https://yt-subtitles.internal/?v=long1&fmt=prompt', longStore);
+    assert.ok(longFull.body.startsWith('Below is a full transcript') && longFull.body.includes('a fairly long line of speech number 3999'));
     console.log('ok  复制原文、在 Claude 中打开（带标题，太长改用剪贴板），给快捷指令的地址直接返回文字');
   }
 

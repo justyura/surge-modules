@@ -1546,11 +1546,11 @@ function claudePrompt(title, text) {
 }
 
 // 在 Claude App 里开一个新对话、把提示词和原文填进输入框（claude://claude.ai/new?q=，非官方但能用）。
-// 太长放不进链接：提示词照样填，原文的位置换成一句提示，原文靠剪贴板
+// Claude 有时不填（比如 App 本来就开着），所以剪贴板里也放同样的完整内容（?fmt=prompt），粘贴就是全的。
+// 太长放不进链接：只打开一个新对话，靠剪贴板
 function claudeUrl(title, text) {
   var full = encodeURIComponent(claudePrompt(title, text));
-  if (full.length <= CLAUDE_URL_CHARS) return 'claude://claude.ai/new?q=' + full;
-  return 'claude://claude.ai/new?q=' + encodeURIComponent(claudePrompt(title, '（原文太长放不进链接，已经复制到剪贴板：删掉这一行，长按粘贴）'));
+  return full.length <= CLAUDE_URL_CHARS ? 'claude://claude.ai/new?q=' + full : 'claude://claude.ai/new';
 }
 
 async function exportMain() {
@@ -1587,9 +1587,10 @@ async function exportMain() {
   var plain = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' };
   // 给快捷指令用：原文纯文本、打开 Claude 的链接
   if (fmt === 'original') return { response: { status: 200, headers: plain, body: originalText(entry) } };
-  if (fmt === 'claudeurl') {
+  if (fmt === 'claudeurl' || fmt === 'prompt') {
     var title = entry.v === 'latest' ? '' : await videoInfo(entry.v);
-    return { response: { status: 200, headers: plain, body: claudeUrl(title, originalText(entry)) } };
+    var body = fmt === 'prompt' ? claudePrompt(title, originalText(entry)) : claudeUrl(title, originalText(entry));
+    return { response: { status: 200, headers: plain, body: body } };
   }
   if (fmt === 'srt') {
     return { response: { status: 200, headers: {
@@ -1634,7 +1635,9 @@ async function exportMain() {
   var preview = entry.cues.slice(0, 6).map(function (c) { return escapeHtml(cueText(c, 'both')); }).join('\n\n');
   var json = function (value) { return JSON.stringify(value).replace(/</g, '\\u003c'); };
   var original = originalText(entry);
-  var claude = claudeUrl(entry.v === 'latest' ? '' : await videoInfo(entry.v), original);
+  var videoTitle = entry.v === 'latest' ? '' : await videoInfo(entry.v);
+  var claude = claudeUrl(videoTitle, original);
+  var prompt = claudePrompt(videoTitle, original);
   return { response: { status: 200, headers: html, body: page('导出字幕', '<h1>导出字幕</h1>'
     + '<p>视频 ' + escapeHtml(entry.v) + ' · ' + escapeHtml(entry.lang || '未知语言') + ' · ' + entry.cues.length + ' 句'
     + (translated ? '，译文 ' + translated + ' 句' : '，没有译文') + '</p>'
@@ -1644,11 +1647,11 @@ async function exportMain() {
     + buttons
     + '<button id="copy">复制双语文字</button>'
     + '<pre>' + preview + (entry.cues.length > 6 ? '\n\n…' : '') + '</pre>'
-    + '<script>var original=' + json(original) + ',all=' + json(toText(entry.cues, translated ? 'both' : 'original')) + ',claude=' + json(claude) + ';'
+    + '<script>var original=' + json(original) + ',all=' + json(toText(entry.cues, translated ? 'both' : 'original')) + ',claude=' + json(claude) + ',prompt=' + json(prompt) + ';'
     + 'function copy(id,text,done){document.getElementById(id).onclick=function(){var b=this;'
     + 'navigator.clipboard.writeText(text).then(function(){done?done():b.textContent="已复制"},function(){done?done():b.textContent="复制失败，用「查看纯文本」"})}}'
-    // 先把原文放进剪贴板（太长进不了链接时用得上），再打开 Claude
-    + 'copy("claude",original,function(){location.href=claude});copy("orig",original);copy("copy",all);</script>') } };
+    // 先把提示词和原文放进剪贴板（Claude 没自动填、或者太长进不了链接时粘贴），再打开 Claude
+    + 'copy("claude",prompt,function(){location.href=claude});copy("orig",original);copy("copy",all);</script>') } };
 }
 
 // ---------- 主流程 ----------
