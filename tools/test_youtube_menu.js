@@ -118,5 +118,19 @@ const titles = (buf) => items(buf).map((it) => at(it, [...MODEL, 4, 3])[0].toStr
     console.log('ok  没有视频 ID 也加，打开最近的字幕；参数里没有开关默认开');
   }
 
+  // 4. 模块里参数是字符串："true" 新加一项，"false" 关，"replace" 把「帮助和反馈」换成「导出字幕」（标识符、状态 key 不动）
+  {
+    assert.deepStrictEqual(titles(await run(nextResponse(STANDARD), { subtitleExport: 'true' })), ['画质', '字幕', '导出字幕', '帮助和反馈']);
+    assert.strictEqual(await run(nextResponse(STANDARD), { subtitleExport: 'false' }), null);
+    const out = await run(nextResponse(STANDARD), { subtitleExport: 'replace' });
+    assert.deepStrictEqual(titles(out), ['画质', '字幕', '导出字幕']);
+    const item = items(out)[2];
+    assert.strictEqual(at(item, [...MODEL, 4, 4, 169495254, 49679253, 1])[0].toString(), 'https://yt-subtitles.internal/?v=abcDEF12345');
+    assert.strictEqual(at(item, [153515154, 3, 396644439, 1])[0].toString(), 'menu_item_help_and_feedback', '标识符留着 App 认识的');
+    assert.strictEqual(at(item, [...MODEL, 10])[0].toString(), '/youtube/app/player_overflow_menu/menu_item_help_and_feedback');
+    assert.strictEqual(await run(out, { subtitleExport: 'replace' }), null, '换过了不再换');
+    console.log('ok  参数是字符串：true 新加，false 关，replace 把「帮助和反馈」换成「导出字幕」');
+  }
+
   console.log('全部通过');
 })().catch((e) => { console.error('FAIL', e.message); process.exit(1); });

@@ -484,9 +484,15 @@ SOFTWARE.
         // get_watch / Onesie 里的 next 可能没有 currentVideoEndpoint；没有视频 ID
         // 就打开不带 ID 的导出页，页面显示最近打开过字幕的视频
         const videoId = message.currentVideoEndpoint?.watchEndpoint?.videoId ?? "";
-        if (subtitleExport) {
+        // true：新加一项；replace：把「帮助和反馈」改成「导出字幕」（App 不显示新加的项时用）；false：关
+        const exportMode = String(subtitleExport);
+        if (exportMode !== "false") {
             try {
-                const menu = addSubtitleExportItem(overlay.overflowMenu, videoId);
+                const menu = addSubtitleExportItem(
+                    overlay.overflowMenu,
+                    videoId,
+                    exportMode === "replace",
+                );
                 changed = !sameBytes(menu, overlay.overflowMenu) || changed;
                 overlay.overflowMenu = menu;
             } catch (error) {
@@ -508,7 +514,7 @@ SOFTWARE.
     function replaceStrings(bytes, path, value) {
         return rewriteBinaryPath(bytes, path, () => textEncoder.encode(value));
     }
-    function exportMenuItem(template, videoId) {
+    function exportButton(template, videoId) {
         // Tap → innertubeCommand(169495254) → urlEndpoint(49679253) { url, target: new window }
         const onTap = encodeField(
             [169495254, "", "bytes"],
@@ -521,7 +527,7 @@ SOFTWARE.
                 ]),
             ),
         );
-        let item = rewriteBinaryPath(template, [...MENU_ITEM_MODEL, 4], (button) =>
+        return rewriteBinaryPath(template, [...MENU_ITEM_MODEL, 4], (button) =>
             concatBytes([
                 ...wireFields(button)
                     .filter((field) => ![2, 3, 4].includes(field.no))
@@ -531,6 +537,9 @@ SOFTWARE.
                 encodeField([4, "", "bytes"], onTap),
             ]),
         );
+    }
+    function exportMenuItem(template, videoId) {
+        let item = exportButton(template, videoId);
         item = replaceStrings(item, [...MENU_ITEM_MODEL, 10], EXPORT_STATE);
         item = replaceStrings(item, [153515154, 3, 396644439, 1], EXPORT_ID);
         item = replaceStrings(
@@ -540,22 +549,29 @@ SOFTWARE.
         );
         return item;
     }
-    function addSubtitleExportItem(bytes, videoId) {
+    function addSubtitleExportItem(bytes, videoId, replace = false) {
         const has = (field, marker) =>
             containsMarker(field.data, textEncoder.encode(marker));
         return rewriteBinaryPath(bytes, [66439850], (menu) => {
             const fields = wireFields(menu);
             const items = fields.filter((field) => field.no === 1 && field.wire === 2);
-            if (items.some((field) => has(field, EXPORT_ID))) return menu;
+            if (items.some((field) => has(field, EXPORT_ID) || has(field, EXPORT_URL))) return menu;
             const template = items.find((field) => has(field, "menu_item_help_and_feedback"));
             if (!template) {
                 console.log("YouTube subtitle export: no help item to copy");
                 return menu;
             }
+            if (replace) {
+                // 标识符、状态 key 都留着「帮助和反馈」的，只换标题、图标和点击后打开的地址
+                const changed = encodeField([1, "", "bytes"], exportButton(template.data, videoId));
+                console.log("YouTube subtitle export: replaced help item" + (videoId ? "" : " (no video id)"));
+                return concatBytes(fields.map((field) => (field === template ? changed : field.raw)));
+            }
             const anchor =
                 items.find((field) => has(field, "menu_item_captions")) ??
                 items[items.length - 1];
             const added = encodeField([1, "", "bytes"], exportMenuItem(template.data, videoId));
+            console.log("YouTube subtitle export: added menu item" + (videoId ? "" : " (no video id)"));
             return concatBytes(
                 fields.flatMap((field) => (field === anchor ? [field.raw, added] : [field.raw])),
             );

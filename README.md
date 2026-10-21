@@ -151,7 +151,7 @@ YouTube 有五个开关，默认都是 `true`，不想要就改成 `false`：
 - `YouTube隐藏游戏`：首页里的 Playables 小游戏
 - `YouTube隐藏竖屏直播`：推荐里的竖屏直播
 - `YouTube自动字幕`：打开视频就自动开字幕。视频有原语言的人工字幕就用它，没有就用自动生成的。和「翻译合集」一起装，打开视频直接是双语
-- `YouTube字幕导出`：播放器右上角「更多」菜单里，「字幕」下面加一项「导出字幕」。要和「翻译合集」一起装，用法见「YouTube 字幕导出」一节
+- `YouTube字幕导出`：播放器右上角「更多」菜单里，「字幕」下面加一项「导出字幕」。菜单里看不到就改成 `replace`，把「帮助和反馈」那一项换成「导出字幕」；`false` 关掉。要和「翻译合集」一起装，用法见「YouTube 字幕导出」一节
 
 自动字幕是改的 YouTube 返回的「这个视频默认开不开字幕」，和 YouTube 给日语用户看英文视频时自动开日文字幕是同一个开关。你在某个视频里手动关了字幕，App 会记住，之后可能不再自动开，到播放器里再打开一次就好。
 
@@ -446,6 +446,8 @@ GitHub 和 Stack Overflow 发过去的是简单 HTML，提示词里要求 `<code
 页面地址是 `https://yt-subtitles.internal/?v=视频ID`，由 Surge 里的脚本直接回应，不会发到网上，所以要开 MITM（模块已经加好了）。有的打开方式里菜单拿不到视频 ID，这时打开的是不带 ID 的 `https://yt-subtitles.internal/`，显示最近打开过字幕的那个视频；在 Safari 里直接打开这个地址也行。
 
 菜单是服务器下发给 App 的（protobuf），「导出字幕」是照着「帮助和反馈」复制一份，改了标题、图标和点击后打开的地址。YouTube 改了菜单格式的话，这一项不会出现，不影响别的。
+
+每次加上按钮，Surge 里那条 YouTube 请求的备注会有一行 `YouTube subtitle export: added menu item`（`replace` 时是 `replaced help item`）。有这行但菜单里看不到，说明 App 不显示新加的项，改用 `replace`。
 
 ### YouTube 评论
 
