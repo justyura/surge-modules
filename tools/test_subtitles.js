@@ -844,9 +844,9 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     assert.ok(hint.length < 100, 'Claude 只收前 120 个字左右');
     for (const fmt of ['paste', 'prompt']) {
       const full = (await runExport(`https://yt-subtitles.internal/?v=vid1&fmt=${fmt}`, store)).body;
-      assert.ok(full.startsWith('Below is a full transcript of a video. Give me a detailed summary in Chinese that captures the key points — not a short overview.'), full.slice(0, 80));
-      assert.ok(full.includes('5. Anything the speaker says is important') && full.includes('completeness matters more than brevity.'));
-      assert.ok(full.endsWith('Transcript:\nVideo title: Fixing a squeaky door — Handy Dan\n\n' + original.body.trim()), `?fmt=${fmt}：提示词 + 标题 + 原文`);
+      assert.ok(full.startsWith('Below is a full transcript of a video. Help me absorb and apply it, not just summarize it.\n\nStructure:\n1. Before the summary: 3–5 questions'), full.slice(0, 80));
+      assert.ok(full.includes('7. Answers to the questions in section 1, brief.') && full.includes('Skip filler and sponsor reads. No glossary.\n\nTranscript:\n'));
+      assert.ok(full.endsWith('No glossary.\n\nTranscript:\nVideo title: Fixing a squeaky door — Handy Dan\n\n' + original.body.trim()), `?fmt=${fmt}：提示词 + Transcript: + 标题 + 原文`);
       assert.ok(!full.includes('[paste here]'));
     }
     const page = await runExport('https://yt-subtitles.internal/?v=vid1', store);

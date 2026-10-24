@@ -1522,30 +1522,31 @@ function originalText(entry) {
   return buildParagraphs(entry.cues).join('\n\n') + '\n';
 }
 
-// 发给 Claude 的提示词，字幕原文放在 [paste here]
+// 发给 Claude 的提示词（照用户给的原文），后面接 Transcript: 和字幕原文
 var CLAUDE_PROMPT = [
-  'Below is a full transcript of a video. Give me a detailed summary in Chinese that captures the key points — not a short overview.',
-  '',
-  'Structure it like this:',
-  '1. One-paragraph gist: what the video is about and its central argument or takeaway.',
-  '2. Key points, in the order they appear: for each, a short heading plus 2–4 sentences explaining the idea, the reasoning or evidence given, and any concrete examples, numbers, or names mentioned.',
-  '3. Notable claims or recommendations the speaker makes explicitly.',
-  '4. Terms or concepts worth knowing, each with a one-line explanation.',
-  "5. Anything the speaker says is important but doesn't fully explain, or open questions left unresolved.",
-  '',
-  "Rules: write everything in Chinese, but keep technical terms and proper nouns in their original English alongside the Chinese. Stay faithful to what's actually said — don't add outside knowledge or interpretation. Skip filler, sponsor reads, and repetition. Length can be long; completeness matters more than brevity.",
-  '',
-  'Transcript:',
-  '[paste here]',
+  "Below is a full transcript of a video. Help me absorb and apply it, not just summarize it.",
+  "",
+  "Structure:",
+  "1. Before the summary: 3–5 questions I should be able to answer after watching. Put them first so I can try answering before reading on.",
+  "2. One-paragraph gist: the central argument.",
+  "3. Key points in order, each with a short heading and 2–4 sentences. For each, tag the claim as: [research finding] / [speaker's judgment] / [speaker says uncertain]. Keep names, numbers, examples.",
+  "4. What conflicts with common intuition or what the speakers themselves find surprising — these are the points most worth remembering.",
+  "5. Actionable implications: concrete behaviors that would change if I adopted this, separated into \"explicitly recommended\" vs \"my inference\".",
+  "6. Gaps: what's asserted but not explained, questions asked but not answered, and claims I should verify before acting on.",
+  "7. Answers to the questions in section 1, brief.",
+  "",
+  "Rules: write in Chinese, keep technical terms and proper nouns in English alongside. Stay faithful — no outside knowledge. Skip filler and sponsor reads. No glossary.",
 ].join('\n');
 
 // Claude App 只收链接里 q 的前 120 个字左右（实测在第 119 个字截断），提示词放不进去。
 // 所以链接里只带一句短话，完整内容（提示词 + 视频标题 + 原文）放剪贴板，粘贴后长的会变成附件，提示词在附件开头
 var CLAUDE_HINT = 'Follow the instructions at the top of the text I paste below.';
 
+// 提示词里有 [paste here] 就放在那里，没有就接在最后的 Transcript: 下面
 function claudePrompt(title, text) {
   var body = (title ? 'Video title: ' + title + '\n\n' : '') + text.trim();
-  return CLAUDE_PROMPT.replace('[paste here]', function () { return body; });
+  if (CLAUDE_PROMPT.indexOf('[paste here]') !== -1) return CLAUDE_PROMPT.replace('[paste here]', function () { return body; });
+  return CLAUDE_PROMPT + '\n\nTranscript:\n' + body;
 }
 
 // 在 Claude App 里开一个新对话，输入框里填好那句短话（claude://claude.ai/new?q=，非官方但能用）
