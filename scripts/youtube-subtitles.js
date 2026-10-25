@@ -1524,18 +1524,19 @@ function originalText(entry) {
 
 // 发给 Claude 的提示词（照用户给的原文），后面接 Transcript: 和字幕原文
 var CLAUDE_PROMPT = [
-  "Below is a full transcript of a video. Help me absorb and apply it, not just summarize it.",
+  "Below is a full transcript of a video. Help me decide whether it matters to me, then absorb and apply it — not just summarize it.",
   "",
   "Structure:",
-  "1. Before the summary: 3–5 questions I should be able to answer after watching. Put them first so I can try answering before reading on.",
-  "2. One-paragraph gist: the central argument.",
-  "3. Key points in order, each with a short heading and 2–4 sentences. For each, tag the claim as: [research finding] / [speaker's judgment] / [speaker says uncertain]. Keep names, numbers, examples.",
-  "4. What conflicts with common intuition or what the speakers themselves find surprising — these are the points most worth remembering.",
-  "5. Actionable implications: concrete behaviors that would change if I adopted this, separated into \"explicitly recommended\" vs \"my inference\".",
-  "6. Gaps: what's asserted but not explained, questions asked but not answered, and claims I should verify before acting on.",
-  "7. Answers to the questions in section 1, brief.",
+  "1. What this is: one or two sentences on the topic, who is speaking, and what kind of video it is (lecture, interview, tutorial…).",
+  "2. Why it matters to me: what real problem in everyday life, work, relationships, health or learning this addresses, and what I'd concretely gain from understanding it. If you know things about me (from memory or earlier chats), connect it to my situation specifically; otherwise say who would benefit most. End with a one-line verdict: is it worth my time, and for what.",
+  "3. One-paragraph gist: the central argument.",
+  "4. Key points in order, each with a short heading and 2–4 sentences. For each, tag the claim as: [research finding] / [speaker's judgment] / [speaker says uncertain]. Keep names, numbers, examples.",
+  "5. What conflicts with common intuition or what the speakers themselves find surprising — these are the points most worth remembering.",
+  "6. Actionable implications: concrete behaviors that would change if I adopted this, separated into \"explicitly recommended\" vs \"my inference\". Finish with one small thing I could try this week.",
+  "7. Gaps: what's asserted but not explained, questions asked but not answered, and claims I should verify before acting on.",
+  "8. Check yourself: 3–5 questions to test whether I understood, each followed by a brief answer.",
   "",
-  "Rules: write in Chinese, keep technical terms and proper nouns in English alongside. Stay faithful — no outside knowledge. Skip filler and sponsor reads. No glossary.",
+  "Rules: write in Chinese, keep technical terms and proper nouns in English alongside. Stay faithful — no outside knowledge about the topic; the links to my life in section 2 and the inferences in section 6 are your own reasoning and should read that way. Skip filler and sponsor reads. No glossary.",
 ].join('\n');
 
 // Claude App 只收链接里 q 的前 120 个字左右（实测在第 119 个字截断），提示词放不进去。

@@ -844,8 +844,9 @@ const LLM = (keys = L1) => `&llmkeys=${keys}`;
     assert.ok(hint.length < 100, 'Claude 只收前 120 个字左右');
     for (const fmt of ['paste', 'prompt']) {
       const full = (await runExport(`https://yt-subtitles.internal/?v=vid1&fmt=${fmt}`, store)).body;
-      assert.ok(full.startsWith('Below is a full transcript of a video. Help me absorb and apply it, not just summarize it.\n\nStructure:\n1. Before the summary: 3–5 questions'), full.slice(0, 80));
-      assert.ok(full.includes('7. Answers to the questions in section 1, brief.') && full.includes('Skip filler and sponsor reads. No glossary.\n\nTranscript:\n'));
+      assert.ok(full.startsWith('Below is a full transcript of a video. Help me decide whether it matters to me, then absorb and apply it — not just summarize it.\n\nStructure:\n1. What this is:'), full.slice(0, 80));
+      assert.ok(full.indexOf('2. Why it matters to me:') < full.indexOf('3. One-paragraph gist'), '先说跟我有什么关系');
+      assert.ok(full.includes('8. Check yourself: 3–5 questions') && full.includes('Skip filler and sponsor reads. No glossary.\n\nTranscript:\n'), '测验题在最后');
       assert.ok(full.endsWith('No glossary.\n\nTranscript:\nVideo title: Fixing a squeaky door — Handy Dan\n\n' + original.body.trim()), `?fmt=${fmt}：提示词 + Transcript: + 标题 + 原文`);
       assert.ok(!full.includes('[paste here]'));
     }
